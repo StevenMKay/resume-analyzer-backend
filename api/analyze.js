@@ -5,7 +5,7 @@
 // Enhanced backend with job description matching
 export default async function handler(req, res) {
   // Enable CORS for your domain
-  res.setHeader('Access-Control-Allow-Origin', 'https://stevenmkay.github.io');
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
