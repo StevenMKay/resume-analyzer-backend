@@ -1,3 +1,7 @@
+
+
+
+
 // Enhanced backend with job description matching
 export default async function handler(req, res) {
   // Enable CORS for your domain
@@ -243,64 +247,4 @@ Special Instructions for Job Matching:
 - Mention specific requirements from the job posting in suggestions
 
 Return only the JSON object, no other text.`;
-}
-    // Call OpenAI API
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: 0.7,
-        max_tokens: 2000
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`OpenAI API Error: ${errorData.error?.message || 'Unknown error'}`);
-    }
-
-    const data = await response.json();
-    const aiResponse = data.choices[0].message.content;
-
-    // Parse and validate the AI response
-    let analysis;
-    try {
-      analysis = JSON.parse(aiResponse);
-      
-      // Validate the structure
-      if (!analysis.overallScore || !analysis.categories) {
-        throw new Error('Invalid response structure');
-      }
-    } catch (parseError) {
-      console.error('Failed to parse AI response:', aiResponse);
-      throw new Error('Failed to parse AI analysis results');
-    }
-
-    // Add usage tracking (optional)
-    console.log(`Resume analysis completed for IP: ${clientIP}`);
-
-    // Return the analysis
-    res.status(200).json({
-      success: true,
-      analysis: analysis,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('Error in resume analysis:', error);
-    res.status(500).json({ 
-      error: 'Failed to analyze resume',
-      message: error.message 
-    });
-  }
 }
