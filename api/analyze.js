@@ -250,12 +250,12 @@ function validateAndFixAnalysis(analysis) {
 }
 
 function createStandardPrompt(resumeText) {
-  return `Analyze this resume and provide feedback in JSON format.
+  return `Analyze this resume and provide feedback in JSON format. Deliver actionable, specific insights so the applicant clearly understands strengths, risks, missing metrics, and how the document will read to recruiters. If the resume references a company or industry, include what that implies about domain expertise or tool familiarity inside your feedback text.
 
 Resume:
 ${resumeText}
 
-Return a JSON object with this structure:
+Return a JSON object with this structure (do not add new top-level fields):
 {
   "overallScore": 85,
   "categories": [
@@ -305,12 +305,12 @@ Return a JSON object with this structure:
 }
 
 Status options: "good" (85+), "warning" (70-84), "critical" (<70)
-Provide specific, actionable suggestions.
+For each category's feedback, reference concrete evidence (metrics, tools, industries) from the resume. Each suggestions array must contain 2-3 sentences explaining *exactly* what to add, rewrite, or quantify; tie the advice back to inferred company expectations whenever possible.
 Return only valid JSON.`;
 }
 
 function createJobMatchingPrompt(resumeText, jobDescription) {
-  return `Analyze this resume against the job description and provide targeted feedback in JSON format.
+  return `Analyze this resume against the job description and provide targeted feedback in JSON format. Highlight where the candidate aligns or diverges from the stated role. Derive a short company intelligence snapshot from the job description (industry, mission, key initiatives) and weave that context into your feedback.
 
 Resume:
 ${resumeText}
@@ -318,7 +318,7 @@ ${resumeText}
 Job Description:
 ${jobDescription}
 
-Return a JSON object with this structure:
+Return a JSON object with this structure (keep the same fields and nesting):
 {
   "overallScore": 80,
   "categories": [
@@ -368,6 +368,6 @@ Return a JSON object with this structure:
 }
 
 Focus on job alignment. Status: "good" (85+), "warning" (70-84), "critical" (<70)
-Be specific about missing elements from the job description.
+In every category, explicitly mention the job's priorities (technologies, leadership scope, compliance needs, etc.) and whether the resume demonstrates them. Use the suggestions array to prescribe concrete edits such as "Add bullet referencing X metric" or "Insert paragraph describing Y platform". When you infer company knowledge (industry, regulatory focus, culture), state it in the feedback so the user learns about the employer.
 Return only valid JSON.`;
 }
