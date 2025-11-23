@@ -277,12 +277,22 @@ function validateAndFixAnalysis(analysis) {
     return category.name || category.title || category.section || category.category || category.label || category.area || category.topic || 'Resume Section';
   };
 
+  const deriveStatusFromScore = (score) => {
+    if (typeof score !== 'number') {
+      return 'warning';
+    }
+    if (score >= 85) return 'good';
+    if (score >= 70) return 'warning';
+    return 'critical';
+  };
+
   // Validate each category
   analysis.categories = analysis.categories.map(category => {
+    const safeScore = (typeof category.score === 'number' && category.score >= 0 && category.score <= 100) ? category.score : 75;
     return {
       name: resolveCategoryName(category),
-      status: ['good', 'warning', 'critical'].includes(category.status) ? category.status : 'warning',
-      score: (typeof category.score === 'number' && category.score >= 0 && category.score <= 100) ? category.score : 75,
+      status: deriveStatusFromScore(safeScore),
+      score: safeScore,
       feedback: category.feedback || "Analysis completed.",
       suggestions: Array.isArray(category.suggestions) && category.suggestions.length ? category.suggestions : ["Consider improvements in this area."]
     };
@@ -291,22 +301,35 @@ function validateAndFixAnalysis(analysis) {
   if (!Array.isArray(analysis.companyInsights)) {
     analysis.companyInsights = [];
   } else {
-    analysis.companyInsights = analysis.companyInsights.map(insight => ({
-      source: insight?.source || 'resume',
-      insight: insight?.insight || 'Highlight what differentiates this employer.',
-      action: insight?.action || 'Mirror the employer focus inside your summary.'
-    }));
+    analysis.companyInsights = analysis.companyInsights
+      .filter(insight => {
+        const text = (insight?.insight || '').trim();
+        const action = (insight?.action || '').trim();
+        return text.length > 0 || action.length > 0;
+      })
+      .map(insight => ({
+        source: insight?.source || 'resume',
+        insight: (insight?.insight || '').trim(),
+        action: (insight?.action || '').trim()
+      }));
   }
 
   if (!Array.isArray(analysis.extraInsights)) {
     analysis.extraInsights = [];
   } else {
-    analysis.extraInsights = analysis.extraInsights.map(item => ({
-      title: item?.title || 'Additional Insight',
-      status: ['good', 'warning', 'critical'].includes(item?.status) ? item.status : 'warning',
-      details: item?.details || 'Provide more detail here.',
-      tips: Array.isArray(item?.tips) && item.tips.length ? item.tips : ['Add specific actions to strengthen this area.']
-    }));
+    analysis.extraInsights = analysis.extraInsights
+      .filter(item => {
+        const title = (item?.title || '').trim();
+        const details = (item?.details || '').trim();
+        const tips = Array.isArray(item?.tips) ? item.tips.filter(tip => typeof tip === 'string' && tip.trim().length > 0) : [];
+        return title.length > 0 || details.length > 0 || tips.length > 0;
+      })
+      .map(item => ({
+        title: (item?.title || '').trim(),
+        status: ['good', 'warning', 'critical'].includes(item?.status) ? item.status : 'warning',
+        details: (item?.details || '').trim(),
+        tips: Array.isArray(item?.tips) && item.tips.length ? item.tips.filter(tip => typeof tip === 'string' && tip.trim().length > 0) : []
+      }));
   }
 
   return analysis;
