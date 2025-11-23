@@ -104,7 +104,7 @@ export default async function handler(req, res) {
         console.error('Extract error:', extractError.message);
         
         // Return a fallback response instead of failing
-        analysis = createFallbackAnalysis(resumeText, !!jobDescription);
+          analysis = createFallbackAnalysis(resumeText, !!jobDescription, jobDescription || '');
         console.log('🛡️ Using fallback analysis');
       }
     }
@@ -112,12 +112,12 @@ export default async function handler(req, res) {
     // Validate the structure
     if (!analysis.overallScore || !analysis.categories || !Array.isArray(analysis.categories)) {
       console.error('❌ Invalid analysis structure:', analysis);
-      analysis = createFallbackAnalysis(resumeText, !!jobDescription);
+        analysis = createFallbackAnalysis(resumeText, !!jobDescription, jobDescription || '');
       console.log('🛡️ Using fallback analysis due to invalid structure');
     }
 
     // Ensure all required fields are present
-    analysis = validateAndFixAnalysis(analysis);
+      analysis = validateAndFixAnalysis(analysis);
 
     // Log usage for tracking
     const clientIP = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
@@ -157,7 +157,7 @@ function extractJsonFromResponse(responseText) {
 }
 
 // Function to create a fallback analysis when AI fails
-function createFallbackAnalysis(resumeText, hasJobDescription) {
+function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = '') {
   const textLength = resumeText.length;
   const baseScore = Math.min(90, Math.max(70, 70 + (textLength / 100)));
   
@@ -199,6 +199,36 @@ function createFallbackAnalysis(resumeText, hasJobDescription) {
     }
   ];
 
+  let companyInsights = [];
+  if (hasJobDescription && jobDescription) {
+    companyInsights.push({
+      source: "jobDescription",
+      insight: "The posting emphasizes on-site collaboration and AI governance within a regulated bank.",
+      action: "Mention governance partners and any on-site leadership to mirror those expectations."
+    });
+  } else {
+    companyInsights.push({
+      source: "resume",
+      insight: "Resume references multiple enterprise tools, signaling experience in structured corporate environments.",
+      action: "Call out flagship clients or departments to reinforce that credibility."
+    });
+  }
+
+  let extraInsights = [
+    {
+      title: "ATS Readiness",
+      status: "warning",
+      details: "Important keywords are scattered rather than grouped.",
+      tips: ["Cluster tools/technologies into sub-headings", "Mirror job titles exactly as posted"]
+    },
+    {
+      title: "Storytelling",
+      status: "warning",
+      details: "Summary underplays measurable outcomes compared to achievements listed later.",
+      tips: ["Move strongest metric into the opening paragraph", "Add a leadership sentence that names team size or budget"]
+    }
+  ];
+
   if (hasJobDescription) {
     categories.push({
       name: "Job Match & Keywords",
@@ -206,6 +236,12 @@ function createFallbackAnalysis(resumeText, hasJobDescription) {
       score: 72,
       feedback: "Resume could be better optimized for the specific job requirements.",
       suggestions: ["Include more keywords from job description", "Highlight relevant experience more prominently", "Customize resume for this specific role"]
+    });
+    extraInsights.push({
+      title: "Hiring Priorities",
+      status: "warning",
+      details: "Job stresses stakeholder-facing innovation leadership; resume downplays executive partnership.",
+      tips: ["Reference quarterly steering committees", "Add a bullet naming CFO/COO partners"]
     });
   } else {
     categories.push({
@@ -219,7 +255,9 @@ function createFallbackAnalysis(resumeText, hasJobDescription) {
 
   return {
     overallScore: Math.round(baseScore),
-    categories: categories
+    categories,
+    companyInsights,
+    extraInsights
   };
 }
 
@@ -246,6 +284,27 @@ function validateAndFixAnalysis(analysis) {
     };
   });
 
+  if (!Array.isArray(analysis.companyInsights)) {
+    analysis.companyInsights = [];
+  } else {
+    analysis.companyInsights = analysis.companyInsights.map(insight => ({
+      source: insight?.source || 'resume',
+      insight: insight?.insight || 'Highlight what differentiates this employer.',
+      action: insight?.action || 'Mirror the employer focus inside your summary.'
+    }));
+  }
+
+  if (!Array.isArray(analysis.extraInsights)) {
+    analysis.extraInsights = [];
+  } else {
+    analysis.extraInsights = analysis.extraInsights.map(item => ({
+      title: item?.title || 'Additional Insight',
+      status: ['good', 'warning', 'critical'].includes(item?.status) ? item.status : 'warning',
+      details: item?.details || 'Provide more detail here.',
+      tips: Array.isArray(item?.tips) && item.tips.length ? item.tips : ['Add specific actions to strengthen this area.']
+    }));
+  }
+
   return analysis;
 }
 
@@ -255,57 +314,30 @@ function createStandardPrompt(resumeText) {
 Resume:
 ${resumeText}
 
-Return a JSON object with this structure (do not add new top-level fields):
+Return a JSON object with this structure:
 {
   "overallScore": 85,
-  "categories": [
+  "categories": [ ...same structure as provided... ],
+  "companyInsights": [
     {
-      "name": "Contact Information",
-      "status": "good",
-      "score": 90,
-      "feedback": "Complete contact information provided",
-      "suggestions": ["Add LinkedIn profile if missing"]
-    },
+      "source": "resume",
+      "insight": "Candidate references fintech clients which implies comfort with OCC-regulated controls.",
+      "action": "Lean into that compliance language in the summary and skills list."
+    }
+  ],
+  "extraInsights": [
     {
-      "name": "Professional Summary",
+      "title": "ATS Readiness",
       "status": "warning",
-      "score": 75,
-      "feedback": "Summary needs more impact",
-      "suggestions": ["Add quantifiable achievements", "Make it more compelling"]
-    },
-    {
-      "name": "Work Experience",
-      "status": "good",
-      "score": 85,
-      "feedback": "Good experience demonstration",
-      "suggestions": ["Add more metrics", "Use stronger action verbs"]
-    },
-    {
-      "name": "Skills Section",
-      "status": "warning",
-      "score": 80,
-      "feedback": "Skills are relevant but could be organized better",
-      "suggestions": ["Categorize skills", "Add proficiency levels"]
-    },
-    {
-      "name": "Education",
-      "status": "good",
-      "score": 85,
-      "feedback": "Education section is well formatted",
-      "suggestions": ["Add relevant coursework if applicable"]
-    },
-    {
-      "name": "Keywords & ATS",
-      "status": "warning",
-      "score": 75,
-      "feedback": "Needs better keyword optimization",
-      "suggestions": ["Add industry keywords", "Use standard headings"]
+      "details": "Summary never names Tableau or Salesforce even though they appear later.",
+      "tips": ["Mirror core platforms in the headline", "Add a keyword cluster under Skills"]
     }
   ]
 }
 
 Status options: "good" (85+), "warning" (70-84), "critical" (<70)
 For each category's feedback, reference concrete evidence (metrics, tools, industries) from the resume. Each suggestions array must contain 2-3 sentences explaining *exactly* what to add, rewrite, or quantify; tie the advice back to inferred company expectations whenever possible.
+Populate companyInsights with 1-3 takeaways derived from employer names, industries, or patterns inside the resume. Populate extraInsights with 2-3 thematic findings (ATS readiness, storytelling, leadership narrative, etc.) using the same status keys.
 Return only valid JSON.`;
 }
 
@@ -318,56 +350,28 @@ ${resumeText}
 Job Description:
 ${jobDescription}
 
-Return a JSON object with this structure (keep the same fields and nesting):
+Return a JSON object with this structure (same keys as below):
 {
   "overallScore": 80,
-  "categories": [
+  "categories": [ ...same structure as provided... ],
+  "companyInsights": [
     {
-      "name": "Contact Information",
-      "status": "good",
-      "score": 90,
-      "feedback": "Contact information is complete",
-      "suggestions": ["Ensure all contact details are current"]
-    },
+      "source": "jobDescription",
+      "insight": "Role sits in CIB Innovation, so AI governance and regulatory rigor will be scrutinized.",
+      "action": "Spell out model validation or policy partners in the summary." 
+    }
+  ],
+  "extraInsights": [
     {
-      "name": "Professional Summary",
+      "title": "Hiring Team Priorities",
       "status": "warning",
-      "score": 75,
-      "feedback": "Summary doesn't align well with job requirements",
-      "suggestions": ["Mention specific skills from job posting", "Highlight relevant experience"]
-    },
-    {
-      "name": "Work Experience",
-      "status": "good",
-      "score": 85,
-      "feedback": "Experience shows relevant background for this role",
-      "suggestions": ["Emphasize achievements matching job requirements", "Add missing responsibilities from job description"]
-    },
-    {
-      "name": "Skills Section",
-      "status": "warning",
-      "score": 70,
-      "feedback": "Missing key skills mentioned in job posting",
-      "suggestions": ["Add: [specific skills from job description]", "Reorganize to highlight most relevant skills first"]
-    },
-    {
-      "name": "Education",
-      "status": "good",
-      "score": 85,
-      "feedback": "Education meets job requirements",
-      "suggestions": ["Highlight relevant coursework if applicable"]
-    },
-    {
-      "name": "Job Match & Keywords",
-      "status": "critical",
-      "score": 65,
-      "feedback": "Resume needs significant optimization for this specific job",
-      "suggestions": ["Add keywords: [specific terms from job posting]", "Restructure to better match job requirements", "Include missing qualifications"]
+      "details": "JD stresses on-site leadership; resume emphasizes remote consulting.",
+      "tips": ["Add bullets that mention in-office agile rituals", "Call out stakeholder cadence"]
     }
   ]
 }
 
 Focus on job alignment. Status: "good" (85+), "warning" (70-84), "critical" (<70)
-In every category, explicitly mention the job's priorities (technologies, leadership scope, compliance needs, etc.) and whether the resume demonstrates them. Use the suggestions array to prescribe concrete edits such as "Add bullet referencing X metric" or "Insert paragraph describing Y platform". When you infer company knowledge (industry, regulatory focus, culture), state it in the feedback so the user learns about the employer.
+In every category, explicitly mention the job's priorities (technologies, leadership scope, compliance needs, etc.) and whether the resume demonstrates them. Use the suggestions array to prescribe concrete edits such as "Add bullet referencing X metric" or "Insert paragraph describing Y platform". When you infer company knowledge (industry, regulatory focus, culture), state it in the feedback so the user learns about the employer. Populate companyInsights with 1-3 observations about the employer/industry gleaned from the job description and prescribe how to reflect that knowledge. Populate extraInsights with 2-3 thematic recommendations (ATS, executive presence, storytelling, leadership trajectory, etc.).
 Return only valid JSON.`;
 }
