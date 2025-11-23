@@ -2,7 +2,7 @@
   "name": "resume-analyzer-backend",
   "version": "1.0.0",
   "description": "Secure backend proxy for Resume Analyzer",
-  "main": "api/analyze.js",
+  "type": "module",
   "scripts": {
     "dev": "vercel dev",
     "deploy": "vercel --prod"
