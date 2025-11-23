@@ -125,11 +125,25 @@ export default async function handler(req, res) {
     }
 
     // Ensure all required fields are present
-      analysis = validateAndFixAnalysis(analysis);
+      analysis = validateAndFixAnalysis(analysis, resumeText, jobDescription || '');
 
     // Log usage for tracking
     const clientIP = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
     console.log(`✅ Resume analysis completed for IP: ${clientIP}, Job Description: ${!!jobDescription}, Fallback: ${usedFallback ? fallbackReason : 'none'}`);
+
+    const atsSignals = createAtsSignals(resumeText, jobDescription || '');
+    analysis.atsSignals = atsSignals;
+    analysis.atsWarnings = buildAtsWarnings(atsSignals);
+
+    const atsInsightCard = generateAtsInsightCard(atsSignals);
+    if (atsInsightCard) {
+      const existingIndex = analysis.extraInsights.findIndex(card => card.title === 'ATS Diagnostics');
+      if (existingIndex >= 0) {
+        analysis.extraInsights[existingIndex] = atsInsightCard;
+      } else {
+        analysis.extraInsights.push(atsInsightCard);
+      }
+    }
 
     // Return the analysis
     res.status(200).json({
@@ -172,7 +186,7 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
   const safeText = typeof resumeText === 'string' ? resumeText : '';
   const safeJobText = typeof jobDescription === 'string' ? jobDescription : '';
   const wordCount = safeText.trim().split(/\s+/).filter(Boolean).length;
-  const bulletCount = (safeText.match(/(^|\n)\s*(?:[-*•]|\d+\.)/g) || []).length;
+  const bulletCount = (safeText.match(/(^|\n)\s*(?:[-*\u2022]|\d+\.)/g) || []).length;
   const metricMatches = (safeText.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length;
   const hasEmail = /@/.test(safeText);
   const emailMatch = safeText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
@@ -182,7 +196,7 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
   const linkedInMatch = safeText.match(/https?:\/\/(?:www\.)?linkedin\.com\/[^\s]+/i);
 
   const lines = safeText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  const bulletLines = lines.filter(line => /^[-*•]|^\d+\./.test(line));
+  const bulletLines = lines.filter(line => /^[-*\u2022]|^\d+\./.test(line));
   const quoteSnippet = (text) => {
     if (!text) return '';
     const cleaned = text.trim();
@@ -520,9 +534,11 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
 }
 
 // Function to validate and fix analysis structure
-function validateAndFixAnalysis(analysis) {
+function validateAndFixAnalysis(analysis, resumeText = '', jobDescription = '') {
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const fixes = [];
+  const resumeSource = typeof resumeText === 'string' ? resumeText : '';
+  const jobSource = typeof jobDescription === 'string' ? jobDescription : '';
 
   const coerceScore = (value, label, hardDefault = 75) => {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -582,7 +598,7 @@ function validateAndFixAnalysis(analysis) {
     }
 
     const suggestions = Array.isArray(category.suggestions) && category.suggestions.length
-      ? category.suggestions
+      ? dedupeAndRefineSuggestions(category.suggestions, resumeSource, jobSource)
       : ["Consider improvements in this area."];
 
     return {
@@ -744,4 +760,213 @@ Return a JSON object with this structure (same keys as below):
 
 Focus on job alignment. Status: "good" (85+), "warning" (70-84), "critical" (<70)
 In every category, explicitly mention the job's priorities (technologies, leadership scope, compliance needs, etc.) and whether the resume demonstrates them. Provide "scoreExplanation" and "positiveExamples" exactly as described above, quoting both the resume and the job description when relevant. Use the suggestions array to prescribe concrete edits such as "Add bullet referencing X metric" or "Insert paragraph describing Y platform", always referencing the specific sentence to change. Before recommending that the user add or emphasize a tool, company, or keyword, search both the resume and job description text (case-insensitive) for that term—if it already appears, reference it as evidence instead of labeling it missing. When you infer company knowledge (industry, regulatory focus, culture), state it in the feedback so the user learns about the employer. Populate companyInsights with 1-3 observations about the employer/industry gleaned from the job description and prescribe how to reflect that knowledge. Include the optional "link" field whenever the job description or resume excerpt provides a concrete URL for that insight (omit otherwise). Populate extraInsights with 2-3 thematic recommendations (ATS, executive presence, storytelling, leadership trajectory, etc.) and cite the resume/JD evidence inside each detail. Return only valid JSON.`;
+}
+
+function dedupeAndRefineSuggestions(suggestions = [], resumeText = '', jobDescription = '') {
+  const resumeSource = typeof resumeText === 'string' ? resumeText : '';
+  const jobSource = typeof jobDescription === 'string' ? jobDescription : '';
+  const seen = new Set();
+  const refined = [];
+
+  suggestions.forEach(original => {
+    if (typeof original !== 'string') {
+      return;
+    }
+    const suggestion = original.trim();
+    if (!suggestion.length) {
+      return;
+    }
+    const normalized = suggestion.toLowerCase();
+    if (seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    refined.push(refineSuggestionText(suggestion, resumeSource, jobSource));
+  });
+
+  return refined.length ? refined : ["Consider improvements in this area."];
+}
+
+function refineSuggestionText(suggestion, resumeText, jobDescription) {
+  if (!suggestion || !resumeText) {
+    return suggestion;
+  }
+
+  const keywords = extractPotentialKeywords(suggestion);
+  const resumeContains = (term) => containsWord(resumeText, term) || containsWord(jobDescription || '', term);
+  const alreadyPresent = keywords.filter(term => resumeContains(term));
+
+  if (alreadyPresent.length && /\b(add|include|mention|surface|call out|highlight)\b/i.test(suggestion)) {
+    const primary = alreadyPresent[0];
+    if (/already appears/i.test(suggestion)) {
+      return suggestion;
+    }
+    return suggestion.replace(/\b(Add|Include|Mention|Surface|Highlight)\b/i, 'Elevate') + ` ("${primary}" is already in the resume—move it higher or pair it with metrics for ATS impact.)`;
+  }
+
+  return suggestion;
+}
+
+function extractPotentialKeywords(text) {
+  if (!text) return [];
+  const quoted = [];
+  const quoteRegex = /["\u201c\u201d']([^"\u201c\u201d']{3,40})["\u201c\u201d']/g;
+  let match;
+  while ((match = quoteRegex.exec(text)) !== null) {
+    quoted.push(match[1].trim());
+  }
+
+  const capitalized = text.match(/\b[A-Z][A-Za-z0-9+&\/-]{2,}(?:\s+[A-Z][A-Za-z0-9+&\/-]{2,}){0,2}\b/g) || [];
+  const combined = [...quoted, ...capitalized].map(term => term.trim()).filter(Boolean);
+  return Array.from(new Set(combined));
+}
+
+function containsWord(text, term) {
+  if (!text || !term) return false;
+  const escaped = escapeRegExp(term.trim());
+  const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+  return regex.test(text);
+}
+
+function escapeRegExp(string) {
+  if (!string) return '';
+  return String(string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function createAtsSignals(resumeText = '', jobDescription = '') {
+  const safeResume = typeof resumeText === 'string' ? resumeText : '';
+  const safeJob = typeof jobDescription === 'string' ? jobDescription : '';
+  const lines = safeResume.split(/\r?\n/).filter(Boolean);
+  const bulletMatches = safeResume.match(/(^|\n)\s*(?:[-*\u2022\u25cf\u25e6\u25aa\u25b6\u00bb]|\d+\.)/g) || [];
+  const metricMatches = safeResume.match(/\b\d{1,3}(?:[,\.\s]\d{3})*(?:%|\s?(?:million|billion|k))?\b/gi) || [];
+  const emailMatches = safeResume.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  const phoneMatches = safeResume.match(/\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/g) || [];
+  const duplicateEmails = emailMatches.length - new Set(emailMatches.map(item => item.toLowerCase())).size;
+  const duplicatePhones = phoneMatches.length - new Set(phoneMatches).size;
+  const tableLikeFormatting = /(\|[^\n]+\|)|(\+[-=]+\+)|(\t\w+)/.test(safeResume);
+  const uppercaseHeadings = lines.filter(line => line.length > 6 && line === line.toUpperCase() && /[A-Z]/.test(line));
+  const keywordStats = computeKeywordStats(safeResume, safeJob);
+
+  return {
+    wordCount: safeResume.split(/\s+/).filter(Boolean).length,
+    bulletCount: bulletMatches.length,
+    bulletDensity: Number((bulletMatches.length / Math.max(lines.length, 1)).toFixed(2)),
+    metricCount: metricMatches.length,
+    metricDensity: Number((metricMatches.length / Math.max(bulletMatches.length || lines.length || 1, 1)).toFixed(2)),
+    keywordOverlap: keywordStats.overlap,
+    missingJobKeywords: keywordStats.missingKeywords,
+    duplicateEmails: Math.max(0, duplicateEmails),
+    duplicatePhones: Math.max(0, duplicatePhones),
+    tableLikeFormatting,
+    uppercaseHeadings: uppercaseHeadings.slice(0, 5),
+    nonStandardBullets: (safeResume.match(/[\u25a0\u25e6\u25aa\u25b6\u00bb]/g) || []).length,
+    consecutiveSpaces: / {3,}/.test(safeResume),
+    resumeHasColumns: /(column|table layout)/i.test(safeResume),
+    atsFriendlyFormat: !tableLikeFormatting && !/(text box|sidebar)/i.test(safeResume)
+  };
+}
+
+function computeKeywordStats(resumeText = '', jobDescription = '') {
+  const jobTokens = (jobDescription.match(/\b[a-z]{4,}\b/gi) || []).map(token => token.toLowerCase());
+  const resumeTokens = new Set((resumeText.match(/\b[a-z]{4,}\b/gi) || []).map(token => token.toLowerCase()));
+  if (!jobTokens.length) {
+    return { overlap: null, missingKeywords: [] };
+  }
+  let overlapCount = 0;
+  const missing = new Set();
+  jobTokens.forEach(token => {
+    if (resumeTokens.has(token)) {
+      overlapCount += 1;
+    } else {
+      missing.add(token);
+    }
+  });
+  return {
+    overlap: Number((overlapCount / jobTokens.length).toFixed(2)),
+    missingKeywords: Array.from(missing).slice(0, 10)
+  };
+}
+
+function buildAtsWarnings(signals) {
+  if (!signals) return [];
+  const warnings = [];
+
+  if (signals.tableLikeFormatting) {
+    warnings.push({
+      issue: 'Table-based layout detected',
+      severity: 'critical',
+      recommendation: 'Replace table/column formatting with single-column text so ATS parsers do not drop content.'
+    });
+  }
+
+  if (signals.duplicateEmails || signals.duplicatePhones) {
+    warnings.push({
+      issue: 'Duplicate contact details',
+      severity: 'warning',
+      recommendation: 'List each email/phone once near the header; duplicates can confuse parsers.'
+    });
+  }
+
+  if (signals.keywordOverlap !== null && signals.keywordOverlap < 0.3) {
+    warnings.push({
+      issue: 'Low job keyword overlap',
+      severity: 'warning',
+      recommendation: 'Mirror more of the job description’s vocabulary inside bullets and skills.'
+    });
+  }
+
+  if (signals.metricDensity < 0.4) {
+    warnings.push({
+      issue: 'Few measurable metrics',
+      severity: 'warning',
+      recommendation: 'Aim for at least half of bullets to include a % or # so ATS scoring models detect impact.'
+    });
+  }
+
+  if (signals.bulletDensity < 0.3) {
+    warnings.push({
+      issue: 'Low bullet coverage',
+      severity: 'warning',
+      recommendation: 'Break dense paragraphs into bullets; ATS scanners prefer structured lists.'
+    });
+  }
+
+  return warnings;
+}
+
+function generateAtsInsightCard(signals) {
+  if (!signals) return null;
+  const tips = [];
+
+  if (signals.tableLikeFormatting) {
+    tips.push('Remove table/column layouts and keep content in a single column.');
+  }
+  if (signals.duplicateEmails || signals.duplicatePhones) {
+    tips.push('Keep one email and phone number; duplicates can be interpreted as separate profiles.');
+  }
+  if (signals.keywordOverlap !== null) {
+    tips.push(`Current JD keyword coverage ~${Math.round(signals.keywordOverlap * 100)}%. Mirror missing phrases inside bullets.`);
+  }
+  if (signals.metricDensity < 0.4) {
+    tips.push('Add % or # metrics to at least half of your bullets to signal measurable impact.');
+  }
+  if (signals.bulletDensity < 0.3) {
+    tips.push('Increase bullet usage so key wins are scannable (aim for 2-4 per role).');
+  }
+
+  const status = tips.length ? (signals.keywordOverlap !== null && signals.keywordOverlap < 0.3 ? 'critical' : 'warning') : 'good';
+  const details = tips.length
+    ? 'ATS diagnostics surfaced a few risks—address these to keep parsing clean.'
+    : 'ATS diagnostics look strong: single-column layout and healthy keyword density.';
+
+  if (!tips.length) {
+    tips.push('Maintain the clean layout and metric-rich bullets; ATS parsing looks strong.');
+  }
+
+  return {
+    title: 'ATS Diagnostics',
+    status,
+    details,
+    tips
+  };
 }
