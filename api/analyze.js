@@ -273,14 +273,18 @@ function validateAndFixAnalysis(analysis) {
     analysis.categories = [];
   }
 
+  const resolveCategoryName = (category = {}) => {
+    return category.name || category.title || category.section || category.category || category.label || category.area || category.topic || 'Resume Section';
+  };
+
   // Validate each category
   analysis.categories = analysis.categories.map(category => {
     return {
-      name: category.name || "Unknown Category",
+      name: resolveCategoryName(category),
       status: ['good', 'warning', 'critical'].includes(category.status) ? category.status : 'warning',
       score: (typeof category.score === 'number' && category.score >= 0 && category.score <= 100) ? category.score : 75,
       feedback: category.feedback || "Analysis completed.",
-      suggestions: Array.isArray(category.suggestions) ? category.suggestions : ["Consider improvements in this area."]
+      suggestions: Array.isArray(category.suggestions) && category.suggestions.length ? category.suggestions : ["Consider improvements in this area."]
     };
   });
 
