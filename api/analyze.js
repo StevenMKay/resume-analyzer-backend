@@ -1,7 +1,17 @@
 // Enhanced backend with job description matching - FIXED VERSION
+const ALLOWED_ORIGINS = new Set([
+  'https://www.careersolutionsfortoday.com',
+  'https://careersolutionsfortoday.com',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500'
+]);
+
 export default async function handler(req, res) {
-  // Enable CORS for your domain
-  res.setHeader('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com');
+  // Enable CORS for production domain + local dev preview
+  const origin = req.headers.origin;
+  if (origin && (ALLOWED_ORIGINS.has(origin) || process.env.ALLOW_ALL_ORIGINS === 'true')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
