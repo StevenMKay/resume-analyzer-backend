@@ -200,17 +200,28 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
   ];
 
   let companyInsights = [];
+  const extractFirstUrl = (text) => {
+    if (!text) return '';
+    const match = text.match(/https?:\/\/\S+/i);
+    return match ? match[0].replace(/[)\],.]*$/, '') : '';
+  };
+
+  const jobDescriptionLink = extractFirstUrl(jobDescription);
+  const resumeLink = extractFirstUrl(resumeText);
+
   if (hasJobDescription && jobDescription) {
     companyInsights.push({
       source: "jobDescription",
       insight: "The posting emphasizes on-site collaboration and AI governance within a regulated bank.",
-      action: "Mention governance partners and any on-site leadership to mirror those expectations."
+      action: "Mention governance partners and any on-site leadership to mirror those expectations.",
+      link: jobDescriptionLink
     });
   } else {
     companyInsights.push({
       source: "resume",
       insight: "Resume references multiple enterprise tools, signaling experience in structured corporate environments.",
-      action: "Call out flagship clients or departments to reinforce that credibility."
+      action: "Call out flagship clients or departments to reinforce that credibility.",
+      link: resumeLink
     });
   }
 
@@ -305,12 +316,14 @@ function validateAndFixAnalysis(analysis) {
       .filter(insight => {
         const text = (insight?.insight || '').trim();
         const action = (insight?.action || '').trim();
-        return text.length > 0 || action.length > 0;
+        const link = (insight?.link || insight?.url || insight?.sourceLink || '').trim();
+        return text.length > 0 || action.length > 0 || link.length > 0;
       })
       .map(insight => ({
         source: insight?.source || 'resume',
         insight: (insight?.insight || '').trim(),
-        action: (insight?.action || '').trim()
+        action: (insight?.action || '').trim(),
+        link: (insight?.link || insight?.url || insight?.sourceLink || '').trim()
       }));
   }
 
@@ -349,7 +362,8 @@ Return a JSON object with this structure:
     {
       "source": "resume",
       "insight": "Candidate references fintech clients which implies comfort with OCC-regulated controls.",
-      "action": "Lean into that compliance language in the summary and skills list."
+      "action": "Lean into that compliance language in the summary and skills list.",
+      "link": "https://company.com/careers/role"
     }
   ],
   "extraInsights": [
@@ -364,7 +378,7 @@ Return a JSON object with this structure:
 
 Status options: "good" (85+), "warning" (70-84), "critical" (<70)
 For each category's feedback, reference concrete evidence (metrics, tools, industries) from the resume. Each suggestions array must contain 2-3 sentences explaining *exactly* what to add, rewrite, or quantify; tie the advice back to inferred company expectations whenever possible.
-Populate companyInsights with 1-3 takeaways derived from employer names, industries, or patterns inside the resume. Populate extraInsights with 2-3 thematic findings (ATS readiness, storytelling, leadership narrative, etc.) using the same status keys.
+Populate companyInsights with 1-3 takeaways derived from employer names, industries, or patterns inside the resume. When a concrete URL is mentioned, include it in the optional "link" field; omit the field entirely when no link is available. Populate extraInsights with 2-3 thematic findings (ATS readiness, storytelling, leadership narrative, etc.) using the same status keys.
 Return only valid JSON.`;
 }
 
@@ -385,7 +399,8 @@ Return a JSON object with this structure (same keys as below):
     {
       "source": "jobDescription",
       "insight": "Role sits in CIB Innovation, so AI governance and regulatory rigor will be scrutinized.",
-      "action": "Spell out model validation or policy partners in the summary." 
+      "action": "Spell out model validation or policy partners in the summary.",
+      "link": "https://employer.com/job123"
     }
   ],
   "extraInsights": [
@@ -399,6 +414,6 @@ Return a JSON object with this structure (same keys as below):
 }
 
 Focus on job alignment. Status: "good" (85+), "warning" (70-84), "critical" (<70)
-In every category, explicitly mention the job's priorities (technologies, leadership scope, compliance needs, etc.) and whether the resume demonstrates them. Use the suggestions array to prescribe concrete edits such as "Add bullet referencing X metric" or "Insert paragraph describing Y platform". When you infer company knowledge (industry, regulatory focus, culture), state it in the feedback so the user learns about the employer. Populate companyInsights with 1-3 observations about the employer/industry gleaned from the job description and prescribe how to reflect that knowledge. Populate extraInsights with 2-3 thematic recommendations (ATS, executive presence, storytelling, leadership trajectory, etc.).
+In every category, explicitly mention the job's priorities (technologies, leadership scope, compliance needs, etc.) and whether the resume demonstrates them. Use the suggestions array to prescribe concrete edits such as "Add bullet referencing X metric" or "Insert paragraph describing Y platform". When you infer company knowledge (industry, regulatory focus, culture), state it in the feedback so the user learns about the employer. Populate companyInsights with 1-3 observations about the employer/industry gleaned from the job description and prescribe how to reflect that knowledge. Include the optional "link" field whenever the job description or resume excerpt provides a concrete URL for that insight (omit otherwise). Populate extraInsights with 2-3 thematic recommendations (ATS, executive presence, storytelling, leadership trajectory, etc.).
 Return only valid JSON.`;
 }
