@@ -1108,22 +1108,34 @@ async function hydrateJobDescription(rawInput = '') {
     return { text: trimmed, source: 'manual', fetchedFrom: null, error: null };
   }
 
+  const { primaryUrl, fallbackUrl } = resolveLinkedInJobUrls(trimmed);
+
   try {
-    const html = await fetchJobPostingSource(trimmed);
+    const html = await fetchJobPostingSource(primaryUrl);
     if (!html) {
-      return { text: '', source: 'url', fetchedFrom: trimmed, error: 'Job page returned no content.' };
+      return { text: '', source: 'url', fetchedFrom: primaryUrl, error: 'Job page returned no content.' };
     }
     const extracted = extractLinkedInJobDescription(html);
     if (extracted) {
-      return { text: extracted, source: 'linkedin', fetchedFrom: trimmed, error: null };
+      return { text: extracted, source: 'linkedin', fetchedFrom: primaryUrl, error: null };
     }
-    return { text: '', source: 'url', fetchedFrom: trimmed, error: 'Unable to extract description from job page.' };
+
+    if (fallbackUrl) {
+      const fallbackHtml = await fetchJobPostingSource(fallbackUrl);
+      if (fallbackHtml) {
+        const fallbackExtracted = extractLinkedInJobDescription(fallbackHtml);
+        if (fallbackExtracted) {
+          return { text: fallbackExtracted, source: 'linkedin', fetchedFrom: fallbackUrl, error: null };
+        }
+      }
+    }
+    return { text: '', source: 'url', fetchedFrom: primaryUrl, error: 'Unable to extract description from job page.' };
   } catch (error) {
     console.warn('Job description hydration failed:', error);
     return {
       text: '',
       source: 'url',
-      fetchedFrom: trimmed,
+      fetchedFrom: fallbackUrl || primaryUrl,
       error: error?.message || 'Failed to fetch job description.'
     };
   }
@@ -1134,6 +1146,59 @@ function isProbablyUrl(value = '') {
     return false;
   }
   return /^https?:\/\//i.test(value.trim());
+}
+
+function resolveLinkedInJobUrls(rawUrl = '') {
+  const trimmed = (rawUrl || '').trim();
+  const defaults = { primaryUrl: trimmed, fallbackUrl: null };
+  if (!trimmed) {
+    return defaults;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch (error) {
+    return defaults;
+  }
+
+  const hostname = parsed.hostname?.toLowerCase() || '';
+  const isLinkedIn = hostname.includes('linkedin.com');
+  if (!isLinkedIn) {
+    return defaults;
+  }
+
+  const extractJobId = () => {
+    if (parsed.searchParams.has('currentJobId')) {
+      return parsed.searchParams.get('currentJobId');
+    }
+    if (parsed.searchParams.has('jobId')) {
+      return parsed.searchParams.get('jobId');
+    }
+    if (parsed.searchParams.has('jobIdList')) {
+      return (parsed.searchParams.get('jobIdList') || '').split(',')[0];
+    }
+    return null;
+  };
+
+  const pathname = parsed.pathname || '';
+  const jobId = extractJobId();
+
+  if (pathname.includes('/jobs/collections/') && jobId) {
+    const canonicalJobUrl = `https://www.linkedin.com/jobs/view/${jobId}`;
+    return { primaryUrl: canonicalJobUrl, fallbackUrl: trimmed };
+  }
+
+  if (pathname.startsWith('/jobs/search/') && jobId) {
+    const canonicalJobUrl = `https://www.linkedin.com/jobs/view/${jobId}`;
+    return { primaryUrl: canonicalJobUrl, fallbackUrl: trimmed };
+  }
+
+  if (pathname.startsWith('/jobs/view/') && !pathname.endsWith('/')) {
+    return { primaryUrl: `${parsed.origin}${pathname}/`, fallbackUrl: trimmed };
+  }
+
+  return defaults;
 }
 
 async function fetchJobPostingSource(jobUrl) {
