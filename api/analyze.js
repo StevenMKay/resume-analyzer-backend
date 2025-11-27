@@ -332,12 +332,12 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
   const categories = [
     makeFallbackCategory('Contact Information', hasEmail && hasPhone ? 'good' : 'warning', hasEmail && hasPhone ? 88 : 71, hasEmail && hasPhone ? 'Header contains email and phone.' : 'Contact block missing either email or phone.', [
       hasEmail ? 'Make sure the email is placed near the name.' : 'Add a professional email address near the header.',
-      hasPhone ? 'Include a clean North-American phone format (###-###-####).' : 'Add a reachable phone number; recruiters expect both email and phone.'
+      hasPhone ? 'Keep the phone number near the header so recruiters can contact you quickly.' : 'Add a reachable phone number; recruiters expect both email and phone.'
     ].filter(Boolean)),
     makeFallbackCategory('Professional Summary', overallScore > 80 ? 'good' : 'warning', clamp(overallScore + 2, 60, 92), 'Summary detected. Ensure it highlights scale, scope, and impact.', ['Add 1-2 quantified wins in the first 3 lines.', 'Mention domain expertise or tools tied to your most recent roles.']),
     makeFallbackCategory('Work Experience', overallScore > 82 ? 'good' : 'warning', clamp(overallScore - 3, 58, 90), 'Experience section detected. Use bullet verbs plus metrics.', ['Keep bullet length under 40 words.', 'Lead with action verb + measurable outcome.']),
-    makeFallbackCategory('Skills Section', 'warning', 74, 'Skills present but can be grouped into tech, tools, leadership for scanners.', [
-      'Group into Technical / Tools / Leadership clusters.',
+    makeFallbackCategory('Skills Section', 'warning', 74, 'Skills are present—surface the tools you rely on most so scanners see them instantly.', [
+      'Lead with the tools and platforms you use most often (SQL, Python, SharePoint, AI initiatives).',
       hasJobDescription ? 'Mirror the job posting keywords.' : 'Highlight the tools, platforms, and leadership strengths that fit your target roles.'
     ]),
     makeFallbackCategory('Education', 'warning', 72, 'Education present—ensure graduation years are current.', ['Add certifications or licenses relevant to the target job.']),
@@ -577,7 +577,7 @@ function removeJobSpecificLanguage(text = '') {
 function generalSuggestionFallback(categoryName = '') {
   const key = categoryName.toLowerCase();
   if (key.includes('skill')) {
-    return 'Group related skills and list the most marketable tools at the top.';
+    return 'List your most in-demand tools first and keep the section tight for quick scans.';
   }
   if (key.includes('experience')) {
     return 'Lead each bullet with an action verb and quantify the impact whenever possible.';
@@ -753,6 +753,10 @@ function canonicalizeKeywordPhrase(raw = '') {
 
 function toTitleCase(text = '') {
   return text.toLowerCase().replace(/\b([a-z])/g, (_, char) => char.toUpperCase());
+}
+
+function escapeRegex(value = '') {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function countBulletSymbols(text = '') {
@@ -1017,11 +1021,13 @@ Resume Text:
 ${resumeText}
 """
 
-Return JSON with keys: overallScore (0-100), categories (array of name, status, score, feedback, suggestions[]), companyInsights (array), extraInsights (array), criticalKeywords (array of 15 phrases), and include specific ATS-related tips.`;
+Return JSON with keys: overallScore (0-100), categories (array of name, status, score, feedback, suggestions[]), companyInsights (array with 0-2 concise insights that highlight how the candidate shows up to employers), extraInsights (array), criticalKeywords (array of 15 phrases), and include specific ATS-related tips. Cite concrete examples or metrics whenever they appear.`;
 }
 
 function createJobMatchingPrompt(resumeText, jobDescription) {
   return `Analyze this resume AGAINST the provided job description. Return JSON only with the same schema as before (overallScore, categories, companyInsights, extraInsights, criticalKeywords). Highlight keyword gaps, measurable wins, and ATS alignment.
+
+CompanyInsights must include 1-3 bullet-style entries that tie the candidate's experience directly to the job/company details when a description is provided.
 
 Resume Text:
 """
@@ -1414,6 +1420,12 @@ const SECTION_PATTERNS = [
   { label: 'Awards', regex: /^awards?\b|^recognition\b/i },
   { label: 'Volunteer', regex: /^volunteer\b|^community\b/i }
 ];
+const INLINE_HEADING_SYNONYMS = {
+  Summary: ['SUMMARY', 'SUMMARY STATEMENT', 'PROFESSIONAL SUMMARY', 'EXECUTIVE SUMMARY', 'PROFILE', 'OVERVIEW'],
+  Experience: ['EXPERIENCE', 'WORK EXPERIENCE', 'PROFESSIONAL EXPERIENCE', 'CAREER EXPERIENCE', 'EMPLOYMENT HISTORY'],
+  Skills: ['SKILLS', 'TECHNICAL SKILLS', 'CORE COMPETENCIES', 'AREAS OF EXPERTISE', 'KEY SKILLS', 'SKILLS & TOOLS'],
+  Education: ['EDUCATION', 'ACADEMICS', 'ACADEMIC HISTORY', 'TRAINING & EDUCATION', 'TRAINING AND EDUCATION', 'EDUCATION & CERTIFICATIONS']
+};
 const MONTH_REGEX = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
 
 function normalizeResumeContent(text = '') {
@@ -1458,12 +1470,37 @@ function deriveResumeStructureSignals(text = '') {
     });
   });
 
-  const bulletLines = lines.filter(line => /^[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾]/.test(line)).length;
+  if (headingsSet.size < CORE_RESUME_SECTIONS.length) {
+    const uppercaseText = normalized.toUpperCase();
+    Object.entries(INLINE_HEADING_SYNONYMS).forEach(([label, synonyms]) => {
+      if (headingsSet.has(label)) {
+        return;
+      }
+      const found = synonyms.some(keyword => {
+        const pattern = new RegExp(`(?:^|[\n\r\s\-\|:/])${escapeRegex(keyword)}(?:$|[\n\r\s\-\|:/])`, 'i');
+        return pattern.test(uppercaseText);
+      });
+      if (found) {
+        headingsSet.add(label);
+      }
+    });
+  }
+
+  const bulletLinePattern = /^[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾]/;
+  const bulletLinesFromStarts = lines.filter(line => bulletLinePattern.test(line)).length;
   const actionVerbPattern = /^(grew|improved|increased|reduced|led|managed|oversaw|designed|built|launched|developed|implemented|optimized|delivered|drove|owned|created|introduced|executed|achieved|coordinated|partnered|spearheaded|streamlined|directed|orchestrated|transformed|modernized|enhanced|boosted)/i;
-  const actionBulletLines = lines.filter(line => {
+  const actionBulletLinesFromStarts = lines.filter(line => {
     const sanitized = line.replace(/^[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾\d\.\)\s]*/, '');
     return actionVerbPattern.test(sanitized);
   }).length;
+
+  const inlineBulletSplitter = /[•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾]/g;
+  const inlineBulletSegments = normalized.split(inlineBulletSplitter).slice(1).map(segment => segment.trim()).filter(Boolean);
+  const inlineBulletCount = inlineBulletSegments.length;
+  const inlineActionBulletCount = inlineBulletSegments.filter(segment => actionVerbPattern.test(segment)).length;
+
+  const bulletLines = Math.max(bulletLinesFromStarts, inlineBulletCount);
+  const actionBulletLines = Math.max(actionBulletLinesFromStarts, inlineActionBulletCount);
 
   const monthRangePattern = new RegExp(`\b${MONTH_REGEX}\.?(?:\s+|\s*,\s*)?(?:19|20)?\d{2}\s*(?:-|–|—|to)\s*(?:present|current|${MONTH_REGEX}\.?(?:\s+|\s*,\s*)?(?:19|20)?\d{2})`, 'gi');
   const yearRangePattern = /\b(?:19|20)\d{2}\s*(?:-|–|—|to)\s*(?:present|current|(?:19|20)\d{2})\b/gi;
