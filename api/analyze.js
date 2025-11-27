@@ -630,17 +630,21 @@ ${jobDescription}
 }
 
 function createAtsSignals(resumeText, jobDescription) {
-  const safeResume = (resumeText || '').toLowerCase();
-  const safeJob = (jobDescription || '').toLowerCase();
+  const rawResume = typeof resumeText === 'string' ? resumeText : '';
+  const rawJob = typeof jobDescription === 'string' ? jobDescription : '';
+  const safeResume = rawResume.toLowerCase();
+  const safeJob = rawJob.toLowerCase();
+  const hasJobDescription = rawJob.trim().length > 0;
   const signals = {
     tablesDetected: /<table|\btable\b/i.test(resumeText),
     imagesDetected: /<img|\.(png|jpg|jpeg|gif)\b/i.test(resumeText),
     columnsDetected: /column/i.test(resumeText),
     pdfIndicators: /adobe|acrobat|pdf/i.test(resumeText),
-    keywordOverlap: compareJobKeywords(safeJob, safeResume),
-    metricsCount: (resumeText.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length,
-    bulletSymbols: countBulletSymbols(resumeText),
-    uppercaseSections: (resumeText.match(/\n[A-Z\s]{6,}\n/g) || []).length
+    keywordOverlap: hasJobDescription ? compareJobKeywords(safeJob, safeResume) : 0,
+    metricsCount: (rawResume.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length,
+    bulletSymbols: countBulletSymbols(rawResume),
+    uppercaseSections: (rawResume.match(/\n[A-Z\s]{6,}\n/g) || []).length,
+    hasJobDescription
   };
   return signals;
 }
@@ -650,7 +654,9 @@ function buildAtsWarnings(signals) {
   if (signals.tablesDetected) warnings.push('Tables detected—ATS may skip table content.');
   if (signals.imagesDetected) warnings.push('Images/logos offer no text for ATS. Replace with plain text.');
   if (signals.columnsDetected) warnings.push('Multi-column layouts can scramble reading order.');
-  if (signals.keywordOverlap < 0.3) warnings.push('Fewer than 30% of job keywords echoed in resume.');
+  if (signals.hasJobDescription && signals.keywordOverlap < 0.3) {
+    warnings.push('Fewer than 30% of job keywords echoed in resume.');
+  }
   if (signals.metricsCount < 3) warnings.push('Add more quantified achievements (numbers or KPIs).');
   if (signals.bulletSymbols < 4) warnings.push('Use bullet points for scannability (4+ recommended).');
   return warnings;
@@ -660,10 +666,30 @@ function generateAtsInsightCard(signals) {
   if (!signals) {
     return null;
   }
+
+  const hasJob = Boolean(signals.hasJobDescription);
+  const detailParts = [];
+  if (hasJob) {
+    detailParts.push(`Keyword overlap ${(signals.keywordOverlap * 100).toFixed(0)}%`);
+  }
+  detailParts.push(`metrics ${signals.metricsCount}`);
+  detailParts.push(`bullets ${signals.bulletSymbols}`);
+
+  let status;
+  if (hasJob) {
+    status = signals.keywordOverlap >= 0.45 ? 'good' : signals.keywordOverlap >= 0.25 ? 'warning' : 'critical';
+  } else if (signals.metricsCount >= 3 && signals.bulletSymbols >= 4) {
+    status = 'good';
+  } else if (signals.metricsCount >= 2 || signals.bulletSymbols >= 2) {
+    status = 'warning';
+  } else {
+    status = 'critical';
+  }
+
   return {
     title: 'ATS Diagnostics',
-    status: signals.keywordOverlap >= 0.45 ? 'good' : signals.keywordOverlap >= 0.25 ? 'warning' : 'critical',
-    details: `Keyword overlap ${(signals.keywordOverlap * 100).toFixed(0)}%, metrics ${signals.metricsCount}, bullets ${signals.bulletSymbols}.`,
+    status,
+    details: detailParts.join(', '),
     tips: buildAtsWarnings(signals)
   };
 }
