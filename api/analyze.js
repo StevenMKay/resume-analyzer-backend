@@ -114,7 +114,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { resumeText, jobDescription } = req.body || {};
+    const { resumeText, jobDescription, hydrateOnly = false } = req.body || {};
     const safeResume = typeof resumeText === 'string' ? resumeText : '';
     const safeJob = typeof jobDescription === 'string' ? jobDescription : '';
     const {
@@ -126,12 +126,29 @@ export default async function handler(req, res) {
 
     const normalizedResume = normalizeResumeContent(safeResume);
     const normalizedJobDescription = normalizeResumeContent(hydratedJobDescription || '');
-    const resumeStructure = deriveResumeStructureSignals(normalizedResume);
+    const hasResolvedJob = normalizedJobDescription && normalizedJobDescription.trim().length > 20;
+
+    if (hydrateOnly) {
+      res.status(200).json({
+        success: Boolean(hasResolvedJob || !jobDescriptionError),
+        jobMatched: hasResolvedJob,
+        jobDescriptionResolved: normalizedJobDescription,
+        jobDescriptionSource,
+        jobDescriptionUrl,
+        jobDescriptionError,
+        structureSignals: null,
+        fallbackUsed: false,
+        fallbackReason: null
+      });
+      return;
+    }
 
     if (!safeResume || safeResume.trim().length < 50) {
       res.status(400).json({ error: 'Resume text is required and must be at least 50 characters' });
       return;
     }
+
+    const resumeStructure = deriveResumeStructureSignals(normalizedResume);
 
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_API_KEY) {
@@ -139,7 +156,6 @@ export default async function handler(req, res) {
       return;
     }
 
-    const hasResolvedJob = normalizedJobDescription && normalizedJobDescription.trim().length > 20;
     const prompt = hasResolvedJob
       ? createJobMatchingPrompt(normalizedResume, normalizedJobDescription)
       : createStandardPrompt(normalizedResume);
