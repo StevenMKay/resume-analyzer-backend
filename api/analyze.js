@@ -261,7 +261,7 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
   const safeText = typeof resumeText === 'string' ? resumeText : '';
   const safeJobText = typeof jobDescription === 'string' ? jobDescription : '';
   const wordCount = safeText.trim().split(/\s+/).filter(Boolean).length;
-  const bulletCount = (safeText.match(/(^|\n)\s*(?:[-*\u2022]|\d+\.)/g) || []).length;
+  const bulletCount = countBulletSymbols(safeText);
   const metricMatches = (safeText.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length;
   const hasEmail = /@/.test(safeText);
   const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(safeText);
@@ -532,6 +532,24 @@ function toTitleCase(text = '') {
   return text.toLowerCase().replace(/\b([a-z])/g, (_, char) => char.toUpperCase());
 }
 
+function countBulletSymbols(text = '') {
+  if (!text || typeof text !== 'string') {
+    return 0;
+  }
+
+  const lineStartPattern = /(?:^|[\r\n\u2028\u2029])\s*(?:[-*•●◦▪▫‣]|\d+\.)/g;
+  const bulletCharPattern = /[•●◦▪▫‣\u2022\u2023\u2043\u25CF\u25CB\u25A0\u25AA\u25AB\u25E6]/g;
+
+  const lineMatches = text.match(lineStartPattern) || [];
+  const inlineMatches = text.match(bulletCharPattern) || [];
+
+  if (lineMatches.length) {
+    return lineMatches.length;
+  }
+
+  return inlineMatches.length;
+}
+
 function enforceResumeCompleteness(analysis, resumeText = '') {
   const text = typeof resumeText === 'string' ? resumeText : '';
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
@@ -621,7 +639,7 @@ function createAtsSignals(resumeText, jobDescription) {
     pdfIndicators: /adobe|acrobat|pdf/i.test(resumeText),
     keywordOverlap: compareJobKeywords(safeJob, safeResume),
     metricsCount: (resumeText.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length,
-    bulletSymbols: (resumeText.match(/(^|\n)\s*(?:[-*\u2022]|\d+\.)/g) || []).length,
+    bulletSymbols: countBulletSymbols(resumeText),
     uppercaseSections: (resumeText.match(/\n[A-Z\s]{6,}\n/g) || []).length
   };
   return signals;
