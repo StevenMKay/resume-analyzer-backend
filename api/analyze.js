@@ -124,6 +124,10 @@ export default async function handler(req, res) {
       error: jobDescriptionError
     } = await hydrateJobDescription(safeJob);
 
+    const normalizedResume = normalizeResumeContent(safeResume);
+    const normalizedJobDescription = normalizeResumeContent(hydratedJobDescription || '');
+    const resumeStructure = deriveResumeStructureSignals(normalizedResume);
+
     if (!safeResume || safeResume.trim().length < 50) {
       res.status(400).json({ error: 'Resume text is required and must be at least 50 characters' });
       return;
@@ -135,20 +139,26 @@ export default async function handler(req, res) {
       return;
     }
 
-    const hasResolvedJob = hydratedJobDescription && hydratedJobDescription.trim().length > 20;
+    const hasResolvedJob = normalizedJobDescription && normalizedJobDescription.trim().length > 20;
     const prompt = hasResolvedJob
-      ? createJobMatchingPrompt(safeResume, hydratedJobDescription)
-      : createStandardPrompt(safeResume);
+      ? createJobMatchingPrompt(normalizedResume, normalizedJobDescription)
+      : createStandardPrompt(normalizedResume);
 
-    const { analysis, fallbackUsed, fallbackReason } = await generateAnalysis(prompt, safeResume, hydratedJobDescription, OPENAI_API_KEY);
+    const { analysis, fallbackUsed, fallbackReason } = await generateAnalysis(
+      prompt,
+      normalizedResume,
+      normalizedJobDescription,
+      OPENAI_API_KEY
+    );
 
-    const normalized = validateAndFixAnalysis(analysis, safeResume, hydratedJobDescription);
-    const completenessAdjusted = enforceResumeCompleteness(normalized, safeResume);
-    const validated = applyPositiveSignalBoost(completenessAdjusted, safeResume);
+    const normalized = validateAndFixAnalysis(analysis, normalizedResume, normalizedJobDescription);
+    const completenessAdjusted = enforceResumeCompleteness(normalized, normalizedResume, resumeStructure);
+    const validated = applyPositiveSignalBoost(completenessAdjusted, normalizedResume, resumeStructure);
 
-    const atsSignals = createAtsSignals(safeResume, hydratedJobDescription);
+    const atsSignals = createAtsSignals(normalizedResume, normalizedJobDescription, resumeStructure);
     validated.atsSignals = atsSignals;
     validated.atsWarnings = buildAtsWarnings(atsSignals);
+    validated.structureSignals = resumeStructure;
 
     const atsInsightCard = generateAtsInsightCard(atsSignals);
     if (atsInsightCard) {
@@ -163,15 +173,29 @@ export default async function handler(req, res) {
       }
     }
 
+    const structureInsightCard = generateStructureInsightCard(resumeStructure);
+    if (structureInsightCard) {
+      if (!Array.isArray(validated.extraInsights)) {
+        validated.extraInsights = [];
+      }
+      const structureIndex = validated.extraInsights.findIndex(card => card.title === 'Structure & Timeline');
+      if (structureIndex >= 0) {
+        validated.extraInsights[structureIndex] = structureInsightCard;
+      } else {
+        validated.extraInsights.push(structureInsightCard);
+      }
+    }
+
     res.status(200).json({
       success: true,
       analysis: validated,
       timestamp: new Date().toISOString(),
       jobMatched: hasResolvedJob,
-      jobDescriptionResolved: hydratedJobDescription,
+      jobDescriptionResolved: normalizedJobDescription,
       jobDescriptionSource,
       jobDescriptionUrl,
       jobDescriptionError,
+      structureSignals: resumeStructure,
       fallbackUsed,
       fallbackReason
     });
@@ -269,18 +293,24 @@ function extractJsonFromResponse(text) {
 function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = '') {
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const safeText = typeof resumeText === 'string' ? resumeText : '';
+  const normalizedResume = normalizeResumeContent(safeText);
+  const resumeSource = normalizedResume || safeText;
   const safeJobText = typeof jobDescription === 'string' ? jobDescription : '';
-  const wordCount = safeText.trim().split(/\s+/).filter(Boolean).length;
-  const bulletCount = countBulletSymbols(safeText);
-  const metricMatches = (safeText.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length;
-  const hasEmail = /@/.test(safeText);
-  const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(safeText);
-  const linksInResume = (safeText.match(/https?:\/\/\S+/gi) || []).length;
+  const normalizedJobText = normalizeResumeContent(safeJobText);
+  const jobSource = normalizedJobText || safeJobText;
+  const wordCount = resumeSource.trim().split(/\s+/).filter(Boolean).length;
+  const bulletCount = countBulletSymbols(resumeSource);
+  const metricMatches = (resumeSource.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length;
+  const hasEmail = /@/.test(resumeSource);
+  const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(resumeSource);
+  const linksInResume = (resumeSource.match(/https?:\/\/\S+/gi) || []).length;
 
   const coverageScore = clamp((wordCount / 400) * 20, 0, 20);
   const metricsScore = clamp(metricMatches * 2.5, 0, 20);
   const structureScore = clamp(bulletCount * 2, 0, 20);
-  const alignmentScore = hasJobDescription ? clamp(compareJobKeywords(safeJobText, safeText) * 100, 0, 20) : clamp((linksInResume > 0 ? 6 : 0) + metricsScore * 0.3, 0, 20);
+  const alignmentScore = hasJobDescription
+    ? clamp(compareJobKeywords(jobSource, resumeSource) * 100, 0, 20)
+    : clamp((linksInResume > 0 ? 6 : 0) + metricsScore * 0.3, 0, 20);
   const overallScore = clamp(55 + coverageScore + metricsScore + structureScore + alignmentScore, 55, 93);
 
   const categories = [
@@ -339,7 +369,7 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
     categories,
     companyInsights: [],
     extraInsights,
-    criticalKeywords: generateCriticalKeywords(safeJobText, safeText).slice(0, 15)
+    criticalKeywords: generateCriticalKeywords(jobSource, resumeSource).slice(0, 15)
   };
 }
 
@@ -736,7 +766,7 @@ function normalizeBulletGlyphs(text) {
   }
 
   return text
-    .replace(/â€¢|Ã¢â‚¬Â¢|Â·|·|∙|⋅|●|◦|▪|▫||/g, '•')
+    .replace(/â€¢|Ã¢â‚¬Â¢|Â·|·|∙|⋅|●|◦|▪|▫|▪️|▫️|||▪︎|‣|•|\u2022|\u25cf|\u25cb|\u25a0|\u25aa|\u25ab|\u2219|\uf0b7|➤|➔|➣|➥|➧|➨|➩|➪|➫|➬|➭|➮|➯|➱|➲|➳|➵|➸|➼|➽|➾|▶|►|▸|▹/gi, '•')
     .replace(/â€“|â€”|–|—|−/g, '-')
     .replace(/•\s*(?=[A-Za-z])/g, '• ');
 }
@@ -780,13 +810,17 @@ function estimateImplicitBulletCount(text = '') {
   return implicitCount >= 4 ? implicitCount : 0;
 }
 
-function enforceResumeCompleteness(analysis, resumeText = '') {
+function enforceResumeCompleteness(analysis, resumeText = '', structureSignals = null) {
   const text = typeof resumeText === 'string' ? resumeText : '';
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
   const hasEmail = /@/.test(text);
   const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(text);
-  const hasSections = /(experience|summary|education|skills)/i.test(text);
-  const bulletCount = countBulletSymbols(text);
+  const hasSections = structureSignals
+    ? ['summary', 'experience', 'skills', 'education'].some(section =>
+        structureSignals.headings?.some(heading => heading.toLowerCase().includes(section))
+      )
+    : /(experience|summary|education|skills)/i.test(text);
+  const bulletCount = structureSignals?.bulletLines ?? countBulletSymbols(text);
 
   let penalty = 0;
   const tips = [];
@@ -834,12 +868,20 @@ function enforceResumeCompleteness(analysis, resumeText = '') {
   return analysis;
 }
 
-function applyPositiveSignalBoost(analysis, resumeText = '') {
+function applyPositiveSignalBoost(analysis, resumeText = '', structureSignals = null) {
   if (!analysis || typeof analysis !== 'object') {
     return analysis;
   }
 
   const signals = detectPositiveSignals(resumeText);
+  const structureHighlights = [];
+  if (structureSignals?.bulletLines >= 10) {
+    structureHighlights.push('High number of concise bullets detected.');
+  }
+  if (structureSignals?.timelineEntries >= 3) {
+    structureHighlights.push('Career timeline consistently documented.');
+  }
+
   const { boost, highlights } = calculatePositiveBoost(signals);
   if (!boost) {
     return analysis;
@@ -940,7 +982,8 @@ function buildExecutiveStrengthInsight(signals, boost, highlights = []) {
     ? `Detected ${detailParts.join(', ')}. Score boosted +${boost} to reflect executive impact.`
     : `Score boosted +${boost} to reflect strong executive signaling.`;
 
-  const tips = highlights.length ? highlights : ['Keep spotlighting measurable outcomes and strategic initiatives.'];
+  const mergedHighlights = [...highlights, ...structureHighlights].filter(Boolean);
+  const tips = mergedHighlights.length ? mergedHighlights : ['Keep spotlighting measurable outcomes, timelines, and strategic initiatives.'];
 
   return {
     title: 'Executive Strengths',
@@ -975,7 +1018,7 @@ ${jobDescription}
 """`;
 }
 
-function createAtsSignals(resumeText, jobDescription) {
+function createAtsSignals(resumeText, jobDescription, structureSignals = null) {
   const rawResume = typeof resumeText === 'string' ? resumeText : '';
   const rawJob = typeof jobDescription === 'string' ? jobDescription : '';
   const safeResume = rawResume.toLowerCase();
@@ -990,7 +1033,8 @@ function createAtsSignals(resumeText, jobDescription) {
     metricsCount: (rawResume.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length,
     bulletSymbols: countBulletSymbols(rawResume),
     uppercaseSections: (rawResume.match(/\n[A-Z\s]{6,}\n/g) || []).length,
-    hasJobDescription
+    hasJobDescription,
+    structure: structureSignals || deriveResumeStructureSignals(rawResume)
   };
   return signals;
 }
@@ -1005,6 +1049,17 @@ function buildAtsWarnings(signals) {
   }
   if (signals.metricsCount < 3) warnings.push('Add more quantified achievements (numbers or KPIs).');
   if (signals.bulletSymbols < 4) warnings.push('Use bullet points for scannability (4+ recommended).');
+  if (signals.structure) {
+    if (signals.structure.missingCoreSections?.length) {
+      warnings.push(`Add clear headings for ${signals.structure.missingCoreSections.join(', ')}.`);
+    }
+    if ((signals.structure.timelineEntries || 0) < 2 && (signals.structure.standaloneYears || 0) < 2) {
+      warnings.push('List date ranges (e.g., 2019–2024) beside each role to show career continuity.');
+    }
+    if ((signals.structure.denseParagraphs || 0) >= 3 && (signals.structure.bulletLines || 0) < 5) {
+      warnings.push('Break dense paragraphs into shorter bullet points for readability.');
+    }
+  }
   return warnings;
 }
 
@@ -1020,6 +1075,9 @@ function generateAtsInsightCard(signals) {
   }
   detailParts.push(`metrics ${signals.metricsCount}`);
   detailParts.push(`bullets ${signals.bulletSymbols}`);
+  if (signals.structure?.headings?.length) {
+    detailParts.push(`sections ${signals.structure.headings.length}`);
+  }
 
   let status;
   if (hasJob) {
@@ -1261,5 +1319,127 @@ function parseJsonSafe(raw = '') {
       return null;
     }
   }
+}
+
+const CORE_RESUME_SECTIONS = ['Summary', 'Experience', 'Skills', 'Education'];
+const SECTION_PATTERNS = [
+  { label: 'Summary', regex: /^(?:professional\s+)?summary\b/i },
+  { label: 'Experience', regex: /^(?:work|professional)?\s*experience\b/i },
+  { label: 'Skills', regex: /^skills\b|^technical skills\b|^core competencies\b/i },
+  { label: 'Education', regex: /^education\b|^academics\b/i },
+  { label: 'Certifications', regex: /^certifications?\b|^licenses?\b/i },
+  { label: 'Projects', regex: /^projects?\b|^case studies\b/i },
+  { label: 'Leadership', regex: /^leadership\b|^management highlights\b/i },
+  { label: 'Awards', regex: /^awards?\b|^recognition\b/i },
+  { label: 'Volunteer', regex: /^volunteer\b|^community\b/i }
+];
+const MONTH_REGEX = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+
+function normalizeResumeContent(text = '') {
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+
+  let normalized = text
+    .replace(/\u00A0/g, ' ')
+    .replace(/\u200B/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\t]+/g, ' ')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
+
+  normalized = normalized.replace(/ {2,}/g, ' ').trim();
+  return normalizeBulletGlyphs(normalized);
+}
+
+function deriveResumeStructureSignals(text = '') {
+  if (!text) {
+    return {
+      headings: [],
+      missingCoreSections: [...CORE_RESUME_SECTIONS],
+      bulletLines: 0,
+      actionBulletLines: 0,
+      timelineEntries: 0,
+      standaloneYears: 0,
+      denseParagraphs: 0
+    };
+  }
+
+  const normalized = normalizeResumeContent(text);
+  const lines = normalized.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const headingsSet = new Set();
+  lines.forEach(line => {
+    SECTION_PATTERNS.forEach(pattern => {
+      if (pattern.regex.test(line)) {
+        headingsSet.add(pattern.label);
+      }
+    });
+  });
+
+  const bulletLines = lines.filter(line => /^[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾]/.test(line)).length;
+  const actionVerbPattern = /^(grew|improved|increased|reduced|led|managed|oversaw|designed|built|launched|developed|implemented|optimized|delivered|drove|owned|created|introduced|executed|achieved|coordinated|partnered|spearheaded|streamlined|directed|orchestrated|transformed|modernized|enhanced|boosted)/i;
+  const actionBulletLines = lines.filter(line => {
+    const sanitized = line.replace(/^[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾\d\.\)\s]*/, '');
+    return actionVerbPattern.test(sanitized);
+  }).length;
+
+  const monthRangePattern = new RegExp(`\b${MONTH_REGEX}\.?(?:\s+|\s*,\s*)?(?:19|20)?\d{2}\s*(?:-|–|—|to)\s*(?:present|current|${MONTH_REGEX}\.?(?:\s+|\s*,\s*)?(?:19|20)?\d{2})`, 'gi');
+  const yearRangePattern = /\b(?:19|20)\d{2}\s*(?:-|–|—|to)\s*(?:present|current|(?:19|20)\d{2})\b/gi;
+  const timelineEntries = (normalized.match(monthRangePattern) || []).length + (normalized.match(yearRangePattern) || []).length;
+  const standaloneYears = (normalized.match(/\b(?:19|20)\d{2}\b/g) || []).length;
+  const denseParagraphs = lines.filter(line => line.length > 220).length;
+
+  const missingCoreSections = CORE_RESUME_SECTIONS.filter(section => !headingsSet.has(section));
+
+  return {
+    headings: Array.from(headingsSet),
+    missingCoreSections,
+    bulletLines,
+    actionBulletLines,
+    timelineEntries,
+    standaloneYears,
+    denseParagraphs
+  };
+}
+
+function generateStructureInsightCard(structureSignals) {
+  if (!structureSignals) {
+    return null;
+  }
+
+  const detailParts = [];
+  detailParts.push(`${structureSignals.headings?.length || 0} section headings detected`);
+  detailParts.push(`${structureSignals.bulletLines || 0} bullet-style lines`);
+  const timelineCount = structureSignals.timelineEntries || structureSignals.standaloneYears || 0;
+  detailParts.push(`${timelineCount} timeline references`);
+
+  let status = 'good';
+  if ((structureSignals.missingCoreSections?.length || 0) >= 2) {
+    status = 'critical';
+  } else if ((structureSignals.missingCoreSections?.length || 0) === 1) {
+    status = 'warning';
+  }
+
+  const tips = [];
+  if (structureSignals.missingCoreSections?.length) {
+    tips.push(`Add clearly labeled ${structureSignals.missingCoreSections.join(', ')} section${structureSignals.missingCoreSections.length > 1 ? 's' : ''}.`);
+  }
+  if ((structureSignals.timelineEntries || 0) < 2 && (structureSignals.standaloneYears || 0) < 2) {
+    tips.push('Include explicit date ranges (e.g., 2019–2024) for each role.');
+  }
+  if ((structureSignals.bulletLines || 0) < 6 && (structureSignals.denseParagraphs || 0) > 0) {
+    tips.push('Break dense paragraphs into concise bullet points to highlight wins.');
+  }
+  if (!tips.length) {
+    tips.push('Structure looks solid—keep consistent headings, bullets, and timelines.');
+  }
+
+  return {
+    title: 'Structure & Timeline',
+    status,
+    details: detailParts.join(', '),
+    tips
+  };
 }
 
