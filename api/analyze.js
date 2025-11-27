@@ -359,6 +359,7 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
   }
 
   const fixes = [];
+  const hasJobDescription = Boolean(jobDescription && jobDescription.trim());
 
   if (typeof analysis.overallScore !== 'number') {
     analysis.overallScore = 78;
@@ -385,13 +386,38 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
         ? category.suggestions.filter(item => typeof item === 'string' && item.trim().length)
         : [];
 
+      const originalName = category.name || 'General';
+      const cleanedName = !hasJobDescription && /job|role|match|alignment/i.test(originalName)
+        ? 'Keyword Optimization'
+        : originalName;
+
+      let cleanedFeedback = (category.feedback || '').trim();
+      let cleanedExplanation = (category.scoreExplanation || '').trim() || cleanedFeedback;
+      let cleanedSuggestions = suggestions.slice();
+
+      if (!hasJobDescription) {
+        cleanedFeedback = removeJobSpecificLanguage(cleanedFeedback);
+        cleanedExplanation = removeJobSpecificLanguage(cleanedExplanation);
+        cleanedSuggestions = cleanedSuggestions.filter(s => !containsJobSpecificLanguage(s));
+      }
+
+      if (!cleanedFeedback) {
+        cleanedFeedback = generalFeedbackFallback(cleanedName);
+      }
+      if (!cleanedExplanation) {
+        cleanedExplanation = cleanedFeedback;
+      }
+      if (!cleanedSuggestions.length) {
+        cleanedSuggestions = [generalSuggestionFallback(cleanedName)];
+      }
+
       return {
-        name: category.name || 'General',
+        name: cleanedName,
         status,
         score: safeScore,
-        scoreExplanation: category.scoreExplanation || category.feedback || '',
-        feedback: (category.feedback || '').trim() || 'No detailed feedback provided.',
-        suggestions: suggestions.length ? suggestions : ['Provide at least two actionable suggestions for this category.']
+        scoreExplanation: cleanedExplanation,
+        feedback: cleanedFeedback,
+        suggestions: cleanedSuggestions
       };
     });
   }
@@ -402,12 +428,30 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
   } else {
     analysis.extraInsights = analysis.extraInsights
       .filter(item => typeof item === 'object' && ((item.title || '').trim().length || (item.details || '').trim().length))
-      .map(item => ({
-        title: (item.title || 'Insight').trim(),
-        status: ['good', 'warning', 'critical'].includes(item.status) ? item.status : 'warning',
-        details: (item.details || '').trim(),
-        tips: Array.isArray(item.tips) ? item.tips.filter(tip => typeof tip === 'string' && tip.trim().length) : []
-      }));
+      .map(item => {
+        const tips = Array.isArray(item.tips) ? item.tips.filter(tip => typeof tip === 'string' && tip.trim().length) : [];
+        let cleanedTips = tips;
+        let cleanedDetails = (item.details || '').trim();
+
+        if (!hasJobDescription) {
+          cleanedDetails = removeJobSpecificLanguage(cleanedDetails);
+          cleanedTips = tips.filter(tip => !containsJobSpecificLanguage(tip));
+        }
+
+        if (!cleanedDetails) {
+          cleanedDetails = 'Focus on clarity, measurable impact, and ATS-friendly formatting.';
+        }
+        if (!cleanedTips.length) {
+          cleanedTips = ['Lead with quantifiable wins and keep formatting simple (no tables or graphics).'];
+        }
+
+        return {
+          title: (item.title || 'Insight').trim(),
+          status: ['good', 'warning', 'critical'].includes(item.status) ? item.status : 'warning',
+          details: cleanedDetails,
+          tips: cleanedTips
+        };
+      });
   }
 
   if (!Array.isArray(analysis.companyInsights)) {
@@ -435,6 +479,72 @@ function deriveStatusFromScore(score) {
   if (score >= 85) return 'good';
   if (score >= 70) return 'warning';
   return 'critical';
+}
+
+const JOB_DESCRIPTION_PATTERNS = [
+  /job description/i,
+  /job posting/i,
+  /this role/i,
+  /the role/i,
+  /role requirements?/i,
+  /hiring manager/i,
+  /position requirements?/i,
+  /align with the role/i
+];
+
+function containsJobSpecificLanguage(text = '') {
+  if (!text) {
+    return false;
+  }
+  return JOB_DESCRIPTION_PATTERNS.some(pattern => pattern.test(text));
+}
+
+function removeJobSpecificLanguage(text = '') {
+  if (!text) {
+    return '';
+  }
+  if (!containsJobSpecificLanguage(text)) {
+    return text;
+  }
+  let cleaned = text;
+  JOB_DESCRIPTION_PATTERNS.forEach(pattern => {
+    cleaned = cleaned.replace(pattern, 'target opportunities');
+  });
+  return cleaned.trim();
+}
+
+function generalSuggestionFallback(categoryName = '') {
+  const key = categoryName.toLowerCase();
+  if (key.includes('skill')) {
+    return 'Group related skills and list the most marketable tools at the top.';
+  }
+  if (key.includes('experience')) {
+    return 'Lead each bullet with an action verb and quantify the impact whenever possible.';
+  }
+  if (key.includes('summary')) {
+    return 'Highlight 1-2 marquee achievements and core specialties in the opening lines.';
+  }
+  if (key.includes('keyword')) {
+    return 'Mirror the terminology recruiters use broadly (cloud, analytics, leadership) without overstuffing.';
+  }
+  return 'Emphasize measurable wins and keep formatting easy to scan.';
+}
+
+function generalFeedbackFallback(categoryName = '') {
+  const key = categoryName.toLowerCase();
+  if (key.includes('skill')) {
+    return 'Skills are present; prioritize the ones that demonstrate depth and recent usage.';
+  }
+  if (key.includes('experience')) {
+    return 'Experience section is strong—ensure each role includes scope, scale, and results.';
+  }
+  if (key.includes('summary')) {
+    return 'Summary sets the tone; keep it concise and packed with high-impact metrics.';
+  }
+  if (key.includes('keyword')) {
+    return 'Optimize phrasing for ATS by using standard titles and spelling out acronyms once.';
+  }
+  return 'Keep the section concise, metric-driven, and easy for recruiters to scan quickly.';
 }
 
 function sanitizeCriticalKeywords(keywords, jobSource, resumeSource) {
