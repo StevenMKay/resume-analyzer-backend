@@ -280,10 +280,40 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
     ].filter(Boolean)),
     makeFallbackCategory('Professional Summary', overallScore > 80 ? 'good' : 'warning', clamp(overallScore + 2, 60, 92), 'Summary detected. Ensure it highlights scale, scope, and impact.', ['Add 1-2 quantified wins in the first 3 lines.', 'Mention domain expertise or tools tied to your most recent roles.']),
     makeFallbackCategory('Work Experience', overallScore > 82 ? 'good' : 'warning', clamp(overallScore - 3, 58, 90), 'Experience section detected. Use bullet verbs plus metrics.', ['Keep bullet length under 40 words.', 'Lead with action verb + measurable outcome.']),
-    makeFallbackCategory('Skills Section', 'warning', 74, 'Skills present but can be grouped into tech, tools, leadership for scanners.', ['Group into Technical / Tools / Leadership clusters.', 'Mirror the job posting keywords.']),
+    makeFallbackCategory('Skills Section', 'warning', 74, 'Skills present but can be grouped into tech, tools, leadership for scanners.', [
+      'Group into Technical / Tools / Leadership clusters.',
+      hasJobDescription ? 'Mirror the job posting keywords.' : 'Highlight the tools, platforms, and leadership strengths that fit your target roles.'
+    ]),
     makeFallbackCategory('Education', 'warning', 72, 'Education present—ensure graduation years are current.', ['Add certifications or licenses relevant to the target job.']),
-    makeFallbackCategory('Job Match & Keywords', 'warning', 70, 'Ensure resume echoes the same language as the job posting and is ATS-safe.', ['Spell out acronyms once (e.g., Key Performance Indicators (KPIs)).', 'Avoid tables/text boxes that ATS may skip.'])
   ];
+
+  if (hasJobDescription) {
+    categories.push(
+      makeFallbackCategory(
+        'Job Match & Keywords',
+        'warning',
+        70,
+        'Ensure the resume echoes critical phrases from the job description and stays ATS-safe.',
+        [
+          'Spell out acronyms once (e.g., Key Performance Indicators (KPIs)).',
+          'Repeat the job’s must-have tools or leadership themes in both summary and bullets.'
+        ]
+      )
+    );
+  } else {
+    categories.push(
+      makeFallbackCategory(
+        'Keyword Optimization',
+        'warning',
+        72,
+        'Prioritize high-value skills and technologies so the resume scans well even without a specific job posting.',
+        [
+          'Cluster related skills and move the most marketable ones to the top of the list.',
+          'Use universally recognized role titles and ATS-friendly phrasing (no graphics or tables).' 
+        ]
+      )
+    );
+  }
 
   const extraInsights = [
     {
@@ -556,7 +586,7 @@ function enforceResumeCompleteness(analysis, resumeText = '') {
   const hasEmail = /@/.test(text);
   const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(text);
   const hasSections = /(experience|summary|education|skills)/i.test(text);
-  const bulletCount = (text.match(/(^|\n)\s*(?:[-*\u2022]|\d+\.)/g) || []).length;
+  const bulletCount = countBulletSymbols(text);
 
   let penalty = 0;
   const tips = [];
