@@ -117,6 +117,12 @@ export default async function handler(req, res) {
     const { resumeText, jobDescription } = req.body || {};
     const safeResume = typeof resumeText === 'string' ? resumeText : '';
     const safeJob = typeof jobDescription === 'string' ? jobDescription : '';
+    const {
+      text: hydratedJobDescription,
+      source: jobDescriptionSource,
+      fetchedFrom: jobDescriptionUrl,
+      error: jobDescriptionError
+    } = await hydrateJobDescription(safeJob);
 
     if (!safeResume || safeResume.trim().length < 50) {
       res.status(400).json({ error: 'Resume text is required and must be at least 50 characters' });
@@ -129,17 +135,18 @@ export default async function handler(req, res) {
       return;
     }
 
-    const prompt = safeJob && safeJob.trim().length > 20
-      ? createJobMatchingPrompt(safeResume, safeJob)
+    const hasResolvedJob = hydratedJobDescription && hydratedJobDescription.trim().length > 20;
+    const prompt = hasResolvedJob
+      ? createJobMatchingPrompt(safeResume, hydratedJobDescription)
       : createStandardPrompt(safeResume);
 
-    const { analysis, fallbackUsed, fallbackReason } = await generateAnalysis(prompt, safeResume, safeJob, OPENAI_API_KEY);
+    const { analysis, fallbackUsed, fallbackReason } = await generateAnalysis(prompt, safeResume, hydratedJobDescription, OPENAI_API_KEY);
 
-    const normalized = validateAndFixAnalysis(analysis, safeResume, safeJob);
+    const normalized = validateAndFixAnalysis(analysis, safeResume, hydratedJobDescription);
     const completenessAdjusted = enforceResumeCompleteness(normalized, safeResume);
     const validated = applyPositiveSignalBoost(completenessAdjusted, safeResume);
 
-    const atsSignals = createAtsSignals(safeResume, safeJob);
+    const atsSignals = createAtsSignals(safeResume, hydratedJobDescription);
     validated.atsSignals = atsSignals;
     validated.atsWarnings = buildAtsWarnings(atsSignals);
 
@@ -160,7 +167,10 @@ export default async function handler(req, res) {
       success: true,
       analysis: validated,
       timestamp: new Date().toISOString(),
-      jobMatched: Boolean(safeJob),
+      jobMatched: hasResolvedJob,
+      jobDescriptionSource,
+      jobDescriptionUrl,
+      jobDescriptionError,
       fallbackUsed,
       fallbackReason
     });
@@ -703,17 +713,29 @@ function countBulletSymbols(text = '') {
     return 0;
   }
 
-  const lineStartPattern = /(?:^|[\r\n\u2028\u2029])\s*(?:[-*•●◦▪▫‣]|\d+\.)/g;
-  const bulletCharPattern = /[•●◦▪▫‣\u2022\u2023\u2043\u25CF\u25CB\u25A0\u25AA\u25AB\u25E6]/g;
+  const normalized = normalizeBulletGlyphs(text);
+  const lineStartPattern = /(?:^|[\r\n\u2028\u2029])\s*(?:[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧]|\d+\.|[a-zA-Z]\))/g;
+  const bulletCharPattern = /[•●◦▪▫‣\u2022\u2023\u2043\u25CF\u25CB\u25A0\u25AA\u25AB\u25E6·‧○◉◎▸▹►✦✧]/g;
 
-  const lineMatches = text.match(lineStartPattern) || [];
-  const inlineMatches = text.match(bulletCharPattern) || [];
+  const lineMatches = normalized.match(lineStartPattern) || [];
+  const inlineMatches = normalized.match(bulletCharPattern) || [];
 
   if (lineMatches.length) {
     return lineMatches.length;
   }
 
   return inlineMatches.length;
+}
+
+function normalizeBulletGlyphs(text) {
+  if (!text) {
+    return '';
+  }
+
+  return text
+    .replace(/â€¢|Ã¢â‚¬Â¢|Â·|·|∙|⋅|●|◦|▪|▫||/g, '•')
+    .replace(/â€“|â€”|–|—|−/g, '-')
+    .replace(/•\s*(?=[A-Za-z])/g, '• ');
 }
 
 function enforceResumeCompleteness(analysis, resumeText = '') {
@@ -974,5 +996,179 @@ function generateAtsInsightCard(signals) {
     details: detailParts.join(', '),
     tips: buildAtsWarnings(signals)
   };
+}
+
+async function hydrateJobDescription(rawInput = '') {
+  const trimmed = (rawInput || '').trim();
+  if (!trimmed) {
+    return { text: '', source: 'none', fetchedFrom: null, error: null };
+  }
+
+  if (!isProbablyUrl(trimmed)) {
+    return { text: trimmed, source: 'manual', fetchedFrom: null, error: null };
+  }
+
+  try {
+    const html = await fetchJobPostingSource(trimmed);
+    if (!html) {
+      return { text: '', source: 'url', fetchedFrom: trimmed, error: 'Job page returned no content.' };
+    }
+    const extracted = extractLinkedInJobDescription(html);
+    if (extracted) {
+      return { text: extracted, source: 'linkedin', fetchedFrom: trimmed, error: null };
+    }
+    return { text: '', source: 'url', fetchedFrom: trimmed, error: 'Unable to extract description from job page.' };
+  } catch (error) {
+    console.warn('Job description hydration failed:', error);
+    return {
+      text: '',
+      source: 'url',
+      fetchedFrom: trimmed,
+      error: error?.message || 'Failed to fetch job description.'
+    };
+  }
+}
+
+function isProbablyUrl(value = '') {
+  if (!value) {
+    return false;
+  }
+  return /^https?:\/\//i.test(value.trim());
+}
+
+async function fetchJobPostingSource(jobUrl) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(jobUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Job page responded with status ${response.status}`);
+    }
+
+    return await response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractLinkedInJobDescription(html = '') {
+  if (!html) {
+    return '';
+  }
+
+  const markupMatch = html.match(/<div[^>]+class="show-more-less-html__markup[^>]*>([\s\S]*?)<\/div>/i);
+  if (markupMatch) {
+    const cleaned = cleanLinkedInMarkup(markupMatch[1]);
+    if (cleaned.length > 40) {
+      return cleaned;
+    }
+  }
+
+  const ldJsonMatches = [...html.matchAll(/<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const match of ldJsonMatches) {
+    try {
+      const data = JSON.parse(match[1]);
+      const description = extractDescriptionFromJson(data);
+      if (description) {
+        return description;
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+
+  const nextDataMatch = html.match(/<script type="application\/json" id="__NEXT_DATA__">([\s\S]*?)<\/script>/);
+  if (nextDataMatch) {
+    try {
+      const nextData = JSON.parse(nextDataMatch[1]);
+      const description = extractDescriptionFromJson(nextData);
+      if (description) {
+        return description;
+      }
+    } catch (error) {
+      // ignore
+    }
+  }
+
+  return '';
+}
+
+function cleanLinkedInMarkup(markup = '') {
+  if (!markup) {
+    return '';
+  }
+  const withoutHidden = markup.replace(/<span class="visually-hidden">[\s\S]*?<\/span>/gi, '');
+  return decodeHtmlEntities(stripHtmlTags(withoutHidden)).trim();
+}
+
+function extractDescriptionFromJson(payload, depth = 0) {
+  if (!payload || depth > 6) {
+    return '';
+  }
+
+  if (typeof payload === 'string') {
+    const cleaned = decodeHtmlEntities(stripHtmlTags(payload));
+    if (cleaned.length > 120) {
+      return cleaned;
+    }
+    return '';
+  }
+
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = extractDescriptionFromJson(item, depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+    return '';
+  }
+
+  if (typeof payload === 'object') {
+    if (typeof payload.description === 'string' && payload.description.trim().length > 80) {
+      return decodeHtmlEntities(stripHtmlTags(payload.description));
+    }
+    if (typeof payload.body === 'string' && payload.body.trim().length > 80) {
+      return decodeHtmlEntities(stripHtmlTags(payload.body));
+    }
+    for (const key of Object.keys(payload)) {
+      const found = extractDescriptionFromJson(payload[key], depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return '';
+}
+
+function stripHtmlTags(html = '') {
+  return html.replace(/<[^>]+>/g, ' ');
+}
+
+function decodeHtmlEntities(text = '') {
+  if (!text) {
+    return '';
+  }
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#xA;/gi, '\n')
+    .replace(/&#x0A;/gi, '\n')
+    .replace(/&#10;/gi, '\n')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
