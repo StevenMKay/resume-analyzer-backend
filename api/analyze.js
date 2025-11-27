@@ -899,6 +899,7 @@ function applyPositiveSignalBoost(analysis, resumeText = '', structureSignals = 
   }
 
   const { boost, highlights } = calculatePositiveBoost(signals);
+  const mergedHighlights = [...highlights, ...structureHighlights].filter(Boolean);
   if (!boost) {
     return analysis;
   }
@@ -910,7 +911,7 @@ function applyPositiveSignalBoost(analysis, resumeText = '', structureSignals = 
     analysis.extraInsights = [];
   }
 
-  const executiveInsight = buildExecutiveStrengthInsight(signals, boost, highlights);
+  const executiveInsight = buildExecutiveStrengthInsight(signals, boost, mergedHighlights);
   if (executiveInsight) {
     const existingIndex = analysis.extraInsights.findIndex(item => item && item.title === executiveInsight.title);
     if (existingIndex >= 0) {
@@ -998,8 +999,7 @@ function buildExecutiveStrengthInsight(signals, boost, highlights = []) {
     ? `Detected ${detailParts.join(', ')}. Score boosted +${boost} to reflect executive impact.`
     : `Score boosted +${boost} to reflect strong executive signaling.`;
 
-  const mergedHighlights = [...highlights, ...structureHighlights].filter(Boolean);
-  const tips = mergedHighlights.length ? mergedHighlights : ['Keep spotlighting measurable outcomes, timelines, and strategic initiatives.'];
+  const tips = highlights.length ? highlights : ['Keep spotlighting measurable outcomes, timelines, and strategic initiatives.'];
 
   return {
     title: 'Executive Strengths',
