@@ -24,6 +24,9 @@ const CRITICAL_GENERIC_TERMS = new Set([
 
 const CRITICAL_SHORT_TOKENS = new Set(['ai','ml','hr','ui','ux','qa','sql','sap','api','aws','erp','crm','etl','bi','ads','pm','devops']);
 
+const BULLET_GLYPH_SOURCE = '•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾';
+const createBulletRegex = (flags = 'g') => new RegExp(`[${BULLET_GLYPH_SOURCE}]`, flags);
+
 const CRITICAL_KEYWORD_LIBRARY = [
   { phrase: 'Program management', hints: ['program manager', 'program management', 'manage programs'], patterns: [/management of programs?/i] },
   { phrase: 'Project management', hints: ['project management', 'project manager'], patterns: [/management of projects?/i] },
@@ -766,7 +769,7 @@ function countBulletSymbols(text = '') {
 
   const normalized = normalizeBulletGlyphs(text);
   const lineStartPattern = /(?:^|[\r\n\u2028\u2029])\s*(?:[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧]|\d+\.|[a-zA-Z]\))/g;
-  const bulletCharPattern = /[•●◦▪▫‣\u2022\u2023\u2043\u25CF\u25CB\u25A0\u25AA\u25AB\u25E6·‧○◉◎▸▹►✦✧]/g;
+  const bulletCharPattern = createBulletRegex('g');
 
   const lineMatches = normalized.match(lineStartPattern) || [];
   const inlineMatches = normalized.match(bulletCharPattern) || [];
@@ -1460,7 +1463,14 @@ function deriveResumeStructureSignals(text = '') {
   }
 
   const normalized = normalizeResumeContent(text);
-  const lines = normalized.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const bulletInjectionRegex = createBulletRegex('g');
+  const bulletPrimed = normalized.replace(bulletInjectionRegex, match => `\n${match}`);
+  const structureFriendly = bulletPrimed
+    .replace(/\s{2,}(?=[A-Z0-9(])/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+
+  const lines = structureFriendly.split(/\n+/).map(line => line.trim()).filter(Boolean);
   const headingsSet = new Set();
   lines.forEach(line => {
     SECTION_PATTERNS.forEach(pattern => {
@@ -1471,7 +1481,7 @@ function deriveResumeStructureSignals(text = '') {
   });
 
   if (headingsSet.size < CORE_RESUME_SECTIONS.length) {
-    const uppercaseText = normalized.toUpperCase();
+    const uppercaseText = structureFriendly.toUpperCase();
     Object.entries(INLINE_HEADING_SYNONYMS).forEach(([label, synonyms]) => {
       if (headingsSet.has(label)) {
         return;
@@ -1486,7 +1496,7 @@ function deriveResumeStructureSignals(text = '') {
     });
   }
 
-  const bulletLinePattern = /^[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾]/;
+  const bulletLinePattern = new RegExp(`^[-–—*${BULLET_GLYPH_SOURCE}]`);
   const bulletLinesFromStarts = lines.filter(line => bulletLinePattern.test(line)).length;
   const actionVerbPattern = /^(grew|improved|increased|reduced|led|managed|oversaw|designed|built|launched|developed|implemented|optimized|delivered|drove|owned|created|introduced|executed|achieved|coordinated|partnered|spearheaded|streamlined|directed|orchestrated|transformed|modernized|enhanced|boosted)/i;
   const actionBulletLinesFromStarts = lines.filter(line => {
@@ -1494,8 +1504,8 @@ function deriveResumeStructureSignals(text = '') {
     return actionVerbPattern.test(sanitized);
   }).length;
 
-  const inlineBulletSplitter = /[•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾]/g;
-  const inlineBulletSegments = normalized.split(inlineBulletSplitter).slice(1).map(segment => segment.trim()).filter(Boolean);
+  const inlineBulletSplitter = createBulletRegex('g');
+  const inlineBulletSegments = structureFriendly.split(inlineBulletSplitter).slice(1).map(segment => segment.trim()).filter(Boolean);
   const inlineBulletCount = inlineBulletSegments.length;
   const inlineActionBulletCount = inlineBulletSegments.filter(segment => actionVerbPattern.test(segment)).length;
 
