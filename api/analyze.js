@@ -1,1133 +1,1575 @@
-// ===============================================================
-//  ADVANCED RESUME ANALYZER — UPDATED (CHUNK A / 4)
-//  Improvements Included:
-//   • More robust normalization
-//   • Stronger keyword extraction
-//   • Hard/Soft skill classification
-//   • Phrase canonicalization improvements
-//   • Cleaner token filtering
-//   • Better CORS handling
-//   • Stronger job hydration fallback
-//   • Foundation for skill gap + ATS breakdown
-// ===============================================================
 
-// ---------------------------
-// Allowed frontend origins
-// ---------------------------
+
+// Advanced resume analyzer backend with ATS diagnostics and keyword enrichment
 const ALLOWED_ORIGINS = new Set([
-  "https://www.careersolutionsfortoday.com",
-  "https://careersolutionsfortoday.com",
-  "https://stevenmkay.github.io",
-  "http://localhost:5500",
-  "http://127.0.0.1:5500"
+  'https://www.careersolutionsfortoday.com',
+  'https://careersolutionsfortoday.com',
+  'https://stevenmkay.github.io',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500'
 ]);
 
-// -----------------------------------------------------------
-// STOP WORDS — expanded & cleaned to prevent false positives
-// -----------------------------------------------------------
 const CRITICAL_KEYWORD_STOP_WORDS = new Set([
-  "the","and","for","with","your","you","our","are","this","that","from","have","has","will","their","they",
-  "job","description","role","responsibilities","requirements","skills","ability","work","team","per","such",
-  "experience","strong","must","should","about","into","within","across","while","including","more",
-  "than","who","what","where","when","which","why","how","via","using","use","can","able","need","needed",
-  "preferred","plus","bonus","an","a","of","in","to","by","as","on","at","is","be","it","or","new","end",
-  "tasks","functions","duties","preferred","requirements","including","include"
+  'the','and','for','with','your','you','our','are','this','that','from','have','has','will','their','they',
+  'job','description','role','responsibilities','requirements','skills','ability','work','team','per','such',
+  'experience','strong','must','should','about','into','within','across','while','including','more',
+  'than','who','what','where','when','which','why','how','via','using','use','can','able','need','needed',
+  'preferred','plus','bonus','an','a','of','in','to','by','as','on','at','is','be','it','or','new','end'
 ]);
 
-// -----------------------------------------------------------
-// GENERIC HR / COMPANY WORDS — filtered out
-// -----------------------------------------------------------
 const CRITICAL_GENERIC_TERMS = new Set([
-  "benefits","benefit","compensation","salary","salaries","insurance","medical","dental","vision","pto",
-  "vacation","holidays","401k","retirement","paid","payment","hourly","hours","company","companies",
-  "organization","organizations","corporate","corporation","enterprise","enterprises","department",
-  "departments","business","businesses","employer","employers","culture","mission","values","people",
-  "opportunity","environment","industry"
+  'benefits','benefit','compensation','salary','salaries','insurance','medical','dental','vision','pto',
+  'vacation','holidays','401k','retirement','paid','payment','hourly','hours','company','companies',
+  'organization','organizations','corporate','corporation','enterprise','enterprises','department',
+  'departments','business','businesses','employer','employers','culture','mission','values','people'
 ]);
 
-// -----------------------------------------------------------
-// Short high-value acronyms
-// -----------------------------------------------------------
-const CRITICAL_SHORT_TOKENS = new Set([
-  "ai","ml","hr","ui","ux","qa","sql","sap","api","aws","erp","crm","etl","bi","ads","pm","devops"
-]);
+const CRITICAL_SHORT_TOKENS = new Set(['ai','ml','hr','ui','ux','qa','sql','sap','api','aws','erp','crm','etl','bi','ads','pm','devops']);
 
-// -----------------------------------------------------------
-// NEW: Hard skill / soft skill clusters for better classification
-// -----------------------------------------------------------
-const HARD_SKILLS = [
-  "sql","python","tableau","power bi","aws","excel","jira","confluence","scrum","agile","lean","six sigma",
-  "sharepoint","snowflake","azure","google cloud","git","html","css","javascript"
-];
+const BULLET_GLYPH_SOURCE = '•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾';
+const createBulletRegex = (flags = 'g') => new RegExp(`[${BULLET_GLYPH_SOURCE}]`, flags);
 
-const SOFT_SKILLS = [
-  "leadership","communication","stakeholder management","collaboration","problem solving","critical thinking",
-  "cross-functional alignment","time management","coaching","mentoring","presentation","negotiation"
-];
-
-// -----------------------------------------------------------
-// Bullet symbol collection (unchanged)
-// -----------------------------------------------------------
-const BULLET_GLYPH_SOURCE = "•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾";
-const createBulletRegex = (flags = "g") => new RegExp(`[${BULLET_GLYPH_SOURCE}]`, flags);
-
-// -----------------------------------------------------------
-// Keyword library — unchanged, but improved matching
-// -----------------------------------------------------------
 const CRITICAL_KEYWORD_LIBRARY = [
-  { phrase: "Program management", hints: ["program manager","program management","manage programs"], patterns: [/management of programs?/i] },
-  { phrase: "Project management", hints: ["project management","project manager"], patterns: [/management of projects?/i] },
-  { phrase: "Cross-functional leadership", hints: ["cross functional","cross-functional","matrixed teams"], patterns: [/cross[- ]functional/i] },
-  { phrase: "Process improvement", hints: ["process improvement","lean","six sigma"], patterns: [/process(?:es)? improvement/i] },
-  { phrase: "Operational excellence", hints: ["operational excellence","efficiency"], patterns: [/operational excellence/i] },
-  { phrase: "Data-driven decision making", hints: ["data driven","data-informed"], patterns: [/data[- ]driven/i] },
-  { phrase: "Success metrics & KPIs", hints: ["kpi","success metrics","performance indicators"] },
-  { phrase: "Resource planning", hints: ["resource planning","resource allocation"], patterns: [/resource allocation/i] },
-  { phrase: "Strategic initiatives", hints: ["strategic initiative","strategic programs"], patterns: [/strategic initiatives?/i] },
-  { phrase: "End-to-end program delivery", hints: ["end to end","end-to-end"], patterns: [/end[- ]to[- ]end/i] },
-  { phrase: "Healthcare operations", hints: ["healthcare operations","care delivery","clinical operations"] },
-  { phrase: "Clinical programs & pathways", hints: ["clinical program","care pathway"], patterns: [/clinical pathways?/i] },
-  { phrase: "Stakeholder management", hints: ["stakeholder management","stakeholder alignment"], patterns: [/stakeholder (?:management|coordination)/i] },
-  { phrase: "Continuous improvement", hints: ["continuous improvement","kaizen"], patterns: [/continuous improvement/i] },
-  { phrase: "Population health", hints: ["population health","at-risk populations"] },
-  { phrase: "Change management", hints: ["change management","organizational change"] },
-  { phrase: "Risk management", hints: ["risk management","mitigate risk"], patterns: [/risk management/i] },
-  { phrase: "Regulatory compliance", hints: ["regulatory compliance","regulatory standards"] },
-  { phrase: "Customer / patient experience", hints: ["customer experience","patient experience"] },
-  { phrase: "Executive reporting & communications", hints: ["executive reporting","senior leadership updates"] },
-  { phrase: "Budget ownership", hints: ["budget ownership","budget management"], patterns: [/budget management/i] },
-  { phrase: "Vendor management", hints: ["vendor management","third-party management"] },
-  { phrase: "Automation & tooling", hints: ["automation","workflow automation"] },
-  { phrase: "Roadmap planning", hints: ["roadmap planning","roadmap management"] }
+  { phrase: 'Program management', hints: ['program manager', 'program management', 'manage programs'], patterns: [/management of programs?/i] },
+  { phrase: 'Project management', hints: ['project management', 'project manager'], patterns: [/management of projects?/i] },
+  { phrase: 'Cross-functional leadership', hints: ['cross functional', 'cross-functional', 'matrixed teams'], patterns: [/lead(?:ing|ership) cross[- ]functional/i] },
+  { phrase: 'Process improvement', hints: ['process improvement', 'process optimize', 'lean', 'six sigma'], patterns: [/improvement of processes?/i] },
+  { phrase: 'Operational excellence', hints: ['operational excellence', 'operational efficiency'], patterns: [/operations? excellence/i] },
+  { phrase: 'Data-driven decision making', hints: ['data driven', 'data-driven', 'data informed'], patterns: [/decisions? driven by data/i] },
+  { phrase: 'Success metrics & KPIs', hints: ['kpi', 'success metrics', 'performance indicators'] },
+  { phrase: 'Resource planning', hints: ['resource planning', 'resource allocation'], patterns: [/allocation of resources?/i] },
+  { phrase: 'Strategic initiatives', hints: ['strategic initiative', 'strategic programs', 'strategic roadmap'] },
+  { phrase: 'End-to-end program delivery', hints: ['end to end', 'end-to-end'], patterns: [/delivery of programs? end to end/i] },
+  { phrase: 'Healthcare operations', hints: ['healthcare operations', 'care delivery', 'clinical operations'] },
+  { phrase: 'Clinical programs & pathways', hints: ['clinical program', 'care pathway', 'clinical pathways'] },
+  { phrase: 'Stakeholder management', hints: ['stakeholder management', 'stakeholder alignment', 'stakeholder engagement'], patterns: [/management of stakeholders?/i, /stakeholder (?:relationships?|coordination)/i] },
+  { phrase: 'Continuous improvement', hints: ['continuous improvement', 'kaizen'] },
+  { phrase: 'Population health', hints: ['population health', 'at-risk populations'] },
+  { phrase: 'Change management', hints: ['change management', 'organizational change'] },
+  { phrase: 'Risk management', hints: ['risk management', 'mitigate risk'], patterns: [/management of risks?/i] },
+  { phrase: 'Regulatory compliance', hints: ['regulatory compliance', 'regulatory standards', 'compliance controls'] },
+  { phrase: 'Customer / patient experience', hints: ['customer experience', 'patient experience'], patterns: [/experience of (?:patients|customers)/i] },
+  { phrase: 'Executive reporting & communications', hints: ['executive reporting', 'executive updates', 'senior leadership updates'] },
+  { phrase: 'Budget ownership', hints: ['budget ownership', 'budget management'], patterns: [/management of budgets?/i] },
+  { phrase: 'Vendor management', hints: ['vendor management', 'partner management', 'third-party management'] },
+  { phrase: 'Automation & tooling', hints: ['automation', 'tooling strategy', 'workflow automation'] },
+  { phrase: 'Roadmap planning', hints: ['roadmap planning', 'roadmap management'] }
 ];
 
-// -----------------------------------------------------------
-// Synonym pattern mappings
-// -----------------------------------------------------------
 const KEYWORD_SYNONYM_PATTERNS = [
-  { regex: /stakeholder (?:engagement|alignment|coordination)/i, phrase: "Stakeholder management" },
-  { regex: /risk (?:assessment|identification)/i, phrase: "Risk management" },
-  { regex: /clinical (?:workflows?|pathways?)/i, phrase: "Clinical programs & pathways" },
-  { regex: /continuous (?:improvement|optimization)/i, phrase: "Continuous improvement" },
-  { regex: /operational (?:readiness|efficiency)/i, phrase: "Operational excellence" }
+  { regex: /management of stakeholders?/i, phrase: 'Stakeholder management' },
+  { regex: /stakeholder (?:engagement|relationships?|coordination|buy[- ]in)/i, phrase: 'Stakeholder management' },
+  { regex: /management of risks?/i, phrase: 'Risk management' },
+  { regex: /management of change/i, phrase: 'Change management' },
+  { regex: /management of vendors?/i, phrase: 'Vendor management' },
+  { regex: /management of budgets?/i, phrase: 'Budget ownership' },
+  { regex: /management of partnerships?/i, phrase: 'Partner management' },
+  { regex: /care pathways?/i, phrase: 'Clinical programs & pathways' },
+  { regex: /population health/i, phrase: 'Population health' },
+  { regex: /patient experience/i, phrase: 'Customer / patient experience' },
+  { regex: /customer experience/i, phrase: 'Customer / patient experience' },
+  { regex: /regulatory (?:compliance|readiness)/i, phrase: 'Regulatory compliance' },
+  { regex: /operational readiness/i, phrase: 'Operational readiness' },
+  { regex: /governance (?:forums?|models?)/i, phrase: 'Governance & controls' }
 ];
 
-// -----------------------------------------------------------
-// Default keywords for fallback
-// -----------------------------------------------------------
 const DEFAULT_CRITICAL_KEYWORDS = [
-  "Program management",
-  "Project management",
-  "Cross-functional leadership",
-  "Process improvement",
-  "Operational excellence",
-  "Data-driven decision making",
-  "Success metrics & KPIs",
-  "Stakeholder management",
-  "Strategic initiatives",
-  "End-to-end program delivery",
-  "Resource planning",
-  "Risk management",
-  "Change management",
-  "Customer / patient experience",
-  "Regulatory compliance"
+  'Program management',
+  'Project management',
+  'Cross-functional leadership',
+  'Process improvement',
+  'Operational excellence',
+  'Operational readiness',
+  'Data-driven decision making',
+  'Success metrics & KPIs',
+  'Stakeholder management',
+  'Strategic initiatives',
+  'End-to-end program delivery',
+  'Resource planning',
+  'Continuous improvement',
+  'Risk management',
+  'Change management',
+  'Regulatory compliance',
+  'Customer / patient experience',
+  'Executive reporting & communications',
+  'Population health',
+  'Vendor management',
+  'Budget ownership',
+  'Partner management',
+  'Governance & controls'
 ];
 
-// ===============================================================
-//  CORS HANDLER — improved logging / fallback
-// ===============================================================
-function applyCors(req, res) {
-  const origin = req.headers.origin;
-  if (origin && (ALLOWED_ORIGINS.has(origin) || process.env.ALLOW_ALL_ORIGINS === "true")) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  } else {
-    res.setHeader("Access-Control-Allow-Origin", "https://www.careersolutionsfortoday.com");
-  }
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-}
-
-// ===============================================================
-//  JOB DESCRIPTION HYDRATION — safer HTML stripping
-// ===============================================================
-async function hydrateJobDescription(rawText = "") {
-  if (!rawText) {
-    return { text: "", source: "none", fetchedFrom: null, error: null };
+export default async function handler(req, res) {
+  try {
+    applyCors(req, res);
+  } catch (err) {
+    console.error('CORS configuration error:', err);
+    res.status(500).json({ error: 'Server configuration error' });
+    return;
   }
 
-  const isUrl = /^https?:\/\//i.test(rawText);
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
 
-  // Direct text case
-  if (!isUrl) {
-    return { text: rawText, source: "direct", fetchedFrom: null, error: null };
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
   }
 
   try {
-    const resp = await fetch(`https://r.jina.ai/${rawText}`);
-    const html = await resp.text();
+    const { resumeText, jobDescription, hydrateOnly = false } = req.body || {};
+    const safeResume = typeof resumeText === 'string' ? resumeText : '';
+    const safeJob = typeof jobDescription === 'string' ? jobDescription : '';
+    const {
+      text: hydratedJobDescription,
+      source: jobDescriptionSource,
+      fetchedFrom: jobDescriptionUrl,
+      error: jobDescriptionError
+    } = await hydrateJobDescription(safeJob);
 
-    // strip HTML tags
-    const cleaned = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    const normalizedResume = normalizeResumeContent(safeResume);
+    const normalizedJobDescription = normalizeResumeContent(hydratedJobDescription || '');
+    const hasResolvedJob = normalizedJobDescription && normalizedJobDescription.trim().length > 20;
 
-    return {
-      text: cleaned,
-      source: "url",
-      fetchedFrom: rawText,
-      error: null
-    };
-  } catch (err) {
-    console.log("Job hydrate failed:", err);
-    return {
-      text: rawText,
-      source: "fallback-raw",
-      fetchedFrom: rawText,
-      error: err.message
-    };
+    if (hydrateOnly) {
+      res.status(200).json({
+        success: Boolean(hasResolvedJob || !jobDescriptionError),
+        jobMatched: hasResolvedJob,
+        jobDescriptionResolved: normalizedJobDescription,
+        jobDescriptionSource,
+        jobDescriptionUrl,
+        jobDescriptionError,
+        structureSignals: null,
+        fallbackUsed: false,
+        fallbackReason: null
+      });
+      return;
+    }
+
+    if (!safeResume || safeResume.trim().length < 50) {
+      res.status(400).json({ error: 'Resume text is required and must be at least 50 characters' });
+      return;
+    }
+
+    const resumeStructure = deriveResumeStructureSignals(normalizedResume);
+
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_API_KEY) {
+      res.status(500).json({ error: 'Server configuration error' });
+      return;
+    }
+
+    const prompt = hasResolvedJob
+      ? createJobMatchingPrompt(normalizedResume, normalizedJobDescription)
+      : createStandardPrompt(normalizedResume);
+
+    const { analysis, fallbackUsed, fallbackReason } = await generateAnalysis(
+      prompt,
+      normalizedResume,
+      normalizedJobDescription,
+      OPENAI_API_KEY
+    );
+
+    const normalized = validateAndFixAnalysis(analysis, normalizedResume, normalizedJobDescription);
+    const completenessAdjusted = enforceResumeCompleteness(normalized, normalizedResume, resumeStructure);
+    const validated = applyPositiveSignalBoost(completenessAdjusted, normalizedResume, resumeStructure);
+
+    const atsSignals = createAtsSignals(normalizedResume, normalizedJobDescription, resumeStructure);
+    validated.atsSignals = atsSignals;
+    validated.atsWarnings = buildAtsWarnings(atsSignals);
+    validated.structureSignals = resumeStructure;
+
+    const atsInsightCard = generateAtsInsightCard(atsSignals);
+    if (atsInsightCard) {
+      if (!Array.isArray(validated.extraInsights)) {
+        validated.extraInsights = [];
+      }
+      const existingIndex = validated.extraInsights.findIndex(card => card.title === 'ATS Diagnostics');
+      if (existingIndex >= 0) {
+        validated.extraInsights[existingIndex] = atsInsightCard;
+      } else {
+        validated.extraInsights.push(atsInsightCard);
+      }
+    }
+
+    const structureInsightCard = generateStructureInsightCard(resumeStructure);
+    if (structureInsightCard) {
+      if (!Array.isArray(validated.extraInsights)) {
+        validated.extraInsights = [];
+      }
+      const structureIndex = validated.extraInsights.findIndex(card => card.title === 'Structure & Timeline');
+      if (structureIndex >= 0) {
+        validated.extraInsights[structureIndex] = structureInsightCard;
+      } else {
+        validated.extraInsights.push(structureInsightCard);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      analysis: validated,
+      timestamp: new Date().toISOString(),
+      jobMatched: hasResolvedJob,
+      jobDescriptionResolved: normalizedJobDescription,
+      jobDescriptionSource,
+      jobDescriptionUrl,
+      jobDescriptionError,
+      structureSignals: resumeStructure,
+      fallbackUsed,
+      fallbackReason
+    });
+  } catch (error) {
+    console.error('Resume analysis error:', error);
+    res.status(500).json({ error: 'Failed to analyze resume', message: error.message });
   }
 }
 
-// ===============================================================
-//  RESUME NORMALIZATION — improved stability
-// ===============================================================
-function normalizeResumeContent(text = "") {
-  if (!text || typeof text !== "string") return "";
-
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/\t/g, " ")
-    .replace(/[•●◦▪▫‣·‧]/g, "- ")
-    .replace(/\s+/g, " ")
-    .trim();
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  if (origin && (ALLOWED_ORIGINS.has(origin) || process.env.ALLOW_ALL_ORIGINS === 'true')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 }
 
-// ===============================================================
-//  NEW: Skill token normalizer — for skill gap & ATS
-// ===============================================================
-function normalizeSkillToken(t = "") {
-  return t.toLowerCase()
-    .replace(/[^a-z0-9+\- ]+/g, "")
-    .trim();
-}
-
-// ===============================================================
-//  NEW: Canonicalize multi-word keyword phrases
-// ===============================================================
-function canonicalizeKeywordPhrase(phrase = "") {
-  if (!phrase) return "";
-  return phrase
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b(ai for|using|knowledge of|experience in|understanding of)\b/gi, "")
-    .trim()
-    .replace(/\bpm\b/gi, "project management");
-}
-
-// ===============================================================
-//  NEW: Extract highlight keywords to send back to frontend
-// ===============================================================
-function extractHighlightKeywords(jobText = "", resumeText = "") {
-  const combined = `${jobText} ${resumeText}`.toLowerCase();
-
-  const found = new Set();
-
-  [...CRITICAL_KEYWORD_LIBRARY.map(k => k.phrase.toLowerCase()), 
-   ...HARD_SKILLS,
-   ...SOFT_SKILLS].forEach(keyword => {
-      if (combined.includes(keyword.toLowerCase())) {
-        found.add(keyword);
-      }
-  });
-
-  return Array.from(found).slice(0, 30); // do not oversaturate UI
-}
-// ===============================================================
-//  OPENAI REQUEST WRAPPER — safer JSON parsing & logging
-// ===============================================================
 async function generateAnalysis(prompt, resumeText, jobDescription, apiKey) {
   const requestBody = {
-    model: "gpt-4o-mini",
+    model: 'gpt-4o-mini',
     messages: [
       {
-        role: "system",
-        content: "You are a professional resume analyzer. Respond ONLY with valid JSON. No commentary. No markdown. No filler."
+        role: 'system',
+        content: 'You are a professional resume analyzer. Respond with valid JSON only—no commentary.'
       },
       {
-        role: "user",
+        role: 'user',
         content: prompt
       }
     ],
-    temperature: 0.15,
-    max_tokens: 3200,
-    response_format: { type: "json_object" }
+    temperature: 0.2,
+    max_tokens: 3000,
+    response_format: { type: 'json_object' }
   };
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
     headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
     },
     body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    console.log("OpenAI error payload:", errText);
-    throw new Error("OpenAI API error: " + response.status);
+    const errorData = await safeJson(response);
+    throw new Error(`OpenAI API Error: ${errorData?.error?.message || response.statusText || 'Unknown error'}`);
   }
 
   const data = await response.json();
-  const raw = data?.choices?.[0]?.message?.content || "";
+  const aiResponse = data.choices?.[0]?.message?.content || '';
 
-  let analysis = null;
+  let analysis;
   let fallbackUsed = false;
   let fallbackReason = null;
 
-  // Attempt direct JSON parse
   try {
-    analysis = JSON.parse(raw);
-  } catch (err1) {
-    // Attempt bracket extraction
+    analysis = JSON.parse(aiResponse);
+  } catch (parseError) {
     try {
-      const extracted = extractJsonFromResponse(raw);
-      analysis = JSON.parse(extracted);
-    } catch (err2) {
-      console.log("JSON parse failed twice. Using fallback.");
+      analysis = JSON.parse(extractJsonFromResponse(aiResponse));
+    } catch (extractError) {
       fallbackUsed = true;
-      fallbackReason = "json_parse_failed";
+      fallbackReason = 'json_parse_failed';
       analysis = createFallbackAnalysis(resumeText, Boolean(jobDescription), jobDescription);
     }
   }
 
-  if (!analysis || typeof analysis !== "object") {
-    console.log("Invalid analysis object. Using fallback.");
+  if (!analysis || typeof analysis !== 'object') {
     fallbackUsed = true;
-    fallbackReason = "invalid_structure";
+    fallbackReason = fallbackReason || 'invalid_analysis_structure';
     analysis = createFallbackAnalysis(resumeText, Boolean(jobDescription), jobDescription);
   }
 
   return { analysis, fallbackUsed, fallbackReason };
 }
 
-// ---------------------------------------------------------------
-// Extract JSON from messy model output
-// ---------------------------------------------------------------
+function safeJson(response) {
+  return response.json().catch(() => null);
+}
+
 function extractJsonFromResponse(text) {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
   if (start === -1 || end === -1 || end <= start) {
-    throw new Error("No JSON object found");
+    throw new Error('No JSON object found');
   }
   return text.slice(start, end + 1);
 }
 
-// ===============================================================
-//  FALLBACK ANALYSIS ENGINE — stronger + more accurate
-// ===============================================================
-function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = "") {
-  console.log("Using fallback analysis...");
+function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = '') {
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  const safeText = typeof resumeText === 'string' ? resumeText : '';
+  const normalizedResume = normalizeResumeContent(safeText);
+  const resumeSource = normalizedResume || safeText;
+  const safeJobText = typeof jobDescription === 'string' ? jobDescription : '';
+  const normalizedJobText = normalizeResumeContent(safeJobText);
+  const jobSource = normalizedJobText || safeJobText;
+  const wordCount = resumeSource.trim().split(/\s+/).filter(Boolean).length;
+  const bulletCount = countBulletSymbols(resumeSource);
+  const metricMatches = (resumeSource.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length;
+  const hasEmail = /@/.test(resumeSource);
+  const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(resumeSource);
+  const linksInResume = (resumeSource.match(/https?:\/\/\S+/gi) || []).length;
 
-  const safe = normalizeResumeContent(resumeText);
-  const tokenCount = safe.split(/\s+/).length;
-  const metricCount = (safe.match(/\b\d[\d,\.%x+]*\b/gi) || []).length;
-  const bulletCount = countBulletSymbols(safe);
-  const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(safe);
-  const hasEmail = /@/.test(safe);
+  const coverageScore = clamp((wordCount / 400) * 20, 0, 20);
+  const metricsScore = clamp(metricMatches * 2.5, 0, 20);
+  const structureScore = clamp(bulletCount * 2, 0, 20);
+  const alignmentScore = hasJobDescription
+    ? clamp(compareJobKeywords(jobSource, resumeSource) * 100, 0, 20)
+    : clamp((linksInResume > 0 ? 6 : 0) + metricsScore * 0.3, 0, 20);
+  const overallScore = clamp(55 + coverageScore + metricsScore + structureScore + alignmentScore, 55, 93);
 
-  // Basic scoring
-  const coverage = clamp(40 + tokenCount / 10, 50, 90);
-  const metrics = clamp(55 + metricCount * 2, 55, 90);
-  const bullets = clamp(55 + bulletCount * 1.5, 55, 88);
+  const categories = [
+    makeFallbackCategory('Contact Information', hasEmail && hasPhone ? 'good' : 'warning', hasEmail && hasPhone ? 88 : 71, hasEmail && hasPhone ? 'Header contains email and phone.' : 'Contact block missing either email or phone.', [
+      hasEmail ? 'Make sure the email is placed near the name.' : 'Add a professional email address near the header.',
+      hasPhone ? 'Keep the phone number near the header so recruiters can contact you quickly.' : 'Add a reachable phone number; recruiters expect both email and phone.'
+    ].filter(Boolean)),
+    makeFallbackCategory('Professional Summary', overallScore > 80 ? 'good' : 'warning', clamp(overallScore + 2, 60, 92), 'Summary detected. Ensure it highlights scale, scope, and impact.', ['Add 1-2 quantified wins in the first 3 lines.', 'Mention domain expertise or tools tied to your most recent roles.']),
+    makeFallbackCategory('Work Experience', overallScore > 82 ? 'good' : 'warning', clamp(overallScore - 3, 58, 90), 'Experience section detected. Use bullet verbs plus metrics.', ['Keep bullet length under 40 words.', 'Lead with action verb + measurable outcome.']),
+    makeFallbackCategory('Skills Section', 'warning', 74, 'Skills are present—surface the tools you rely on most so scanners see them instantly.', [
+      'Lead with the tools and platforms you use most often (SQL, Python, SharePoint, AI initiatives).',
+      hasJobDescription ? 'Mirror the job posting keywords.' : 'Highlight the tools, platforms, and leadership strengths that fit your target roles.'
+    ]),
+    makeFallbackCategory('Education', 'warning', 72, 'Education present—ensure graduation years are current.', ['Add certifications or licenses relevant to the target job.']),
+  ];
 
-  const baseScore = Math.floor((coverage + metrics + bullets) / 3);
+  if (hasJobDescription) {
+    categories.push(
+      makeFallbackCategory(
+        'Job Match & Keywords',
+        'warning',
+        70,
+        'Ensure the resume echoes critical phrases from the job description and stays ATS-safe.',
+        [
+          'Spell out acronyms once (e.g., Key Performance Indicators (KPIs)).',
+          'Repeat the job’s must-have tools or leadership themes in both summary and bullets.'
+        ]
+      )
+    );
+  } else {
+    categories.push(
+      makeFallbackCategory(
+        'Keyword Optimization',
+        'warning',
+        72,
+        'Prioritize high-value skills and technologies so the resume scans well even without a specific job posting.',
+        [
+          'Cluster related skills and move the most marketable ones to the top of the list.',
+          'Use universally recognized role titles and ATS-friendly phrasing (no graphics or tables).' 
+        ]
+      )
+    );
+  }
 
-  // Skill gap detection (lightweight fallback)
-  const skillGaps = detectSkillGaps(jobDescription, resumeText);
+  const extraInsights = [
+    {
+      title: 'Resume Completeness',
+      status: overallScore > 80 ? 'good' : 'warning',
+      details: hasEmail && hasPhone ? 'Contact basics detected. Continue reinforcing measurable outcomes.' : 'Add a complete contact block with phone + professional email.',
+      tips: ['Keep total length near 650-750 words for mid-senior roles.', 'Use consistent bullet symbols and tense.']
+    }
+  ];
 
   return {
-    overallScore: baseScore,
-    categories: [
-      {
-        name: "Contact Information",
-        status: hasEmail && hasPhone ? "good" : "warning",
-        score: hasEmail && hasPhone ? 88 : 70,
-        feedback: hasEmail && hasPhone
-          ? "Resume contains essential contact details."
-          : "Add missing contact basics (email + phone).",
-        suggestions: hasEmail && hasPhone
-          ? ["Keep contact details concise and visible."]
-          : ["Add both email + phone in header."]
-      },
-      {
-        name: "Work Experience",
-        status: "warning",
-        score: metrics,
-        feedback: "Experience found. Ensure strong quantified achievements.",
-        suggestions: [
-          "Lead bullets with action verbs.",
-          "Include measurable results (%, $, time saved)."
-        ]
-      },
-      {
-        name: hasJobDescription ? "Job Match & Keywords" : "Keyword Optimization",
-        status: "warning",
-        score: coverage,
-        feedback: hasJobDescription
-          ? "Resume partially aligns with job posting."
-          : "Resume uses recognizable terminology but can be optimized.",
-        suggestions: [
-          "Repeat must-have skills in summary + bullets.",
-          "Use standard job title terminology."
-        ]
-      }
-    ],
-    criticalKeywords: generateCriticalKeywords(jobDescription, resumeText).slice(0, 15),
-    extraInsights: [
-      {
-        title: "Strengths Summary",
-        status: "good",
-        details: buildStrengthSummary(resumeText),
-        tips: [
-          "Keep emphasizing quantified accomplishments.",
-          "Make achievements scannable with short, punchy bullets."
-        ]
-      },
-      {
-        title: "Skill Gap Overview",
-        status: skillGaps.count > 0 ? "warning" : "good",
-        details:
-          skillGaps.count === 0
-            ? "Resume covers all major job-required skills."
-            : "Some required job skills appear missing.",
-        tips: skillGaps.missing.slice(0, 5)
-      }
-    ]
+    overallScore,
+    categories,
+    companyInsights: [],
+    extraInsights,
+    criticalKeywords: generateCriticalKeywords(jobSource, resumeSource).slice(0, 15)
   };
 }
 
-// ---------------------------------------------------------------
-// Utility clamp
-// ---------------------------------------------------------------
-function clamp(value, min, max) {
+function makeFallbackCategory(name, status, score, feedback, suggestions) {
+  return { name, status, score, feedback, suggestions };
+}
+
+function compareJobKeywords(jobText, resumeText) {
+  const jobTokens = (jobText.toLowerCase().match(/[a-z]{4,}/g) || []).filter(token => !CRITICAL_KEYWORD_STOP_WORDS.has(token));
+  const resumeTokens = new Set(resumeText.toLowerCase().match(/[a-z]{4,}/g) || []);
+  if (!jobTokens.length) {
+    return 0;
+  }
+  const uniqueJob = Array.from(new Set(jobTokens));
+  let overlap = 0;
+  uniqueJob.forEach(token => {
+    if (resumeTokens.has(token)) {
+      overlap += 1;
+    }
+  });
+  return overlap / uniqueJob.length;
+}
+
+function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
+  if (!analysis || typeof analysis !== 'object') {
+    return createFallbackAnalysis(resumeText, Boolean(jobDescription), jobDescription);
+  }
+
+  const fixes = [];
+  const hasJobDescription = Boolean(jobDescription && jobDescription.trim());
+
+  if (typeof analysis.overallScore !== 'number') {
+    analysis.overallScore = 78;
+    fixes.push('overallScore missing; defaulted to 78.');
+  }
+
+  if (!Array.isArray(analysis.categories)) {
+    analysis.categories = [];
+    fixes.push('categories missing; defaulted to empty array.');
+  }
+
+  if (!analysis.categories.length) {
+    analysis.categories = createFallbackAnalysis(resumeText, Boolean(jobDescription), jobDescription).categories;
+    fixes.push('categories empty; fallback categories applied.');
+  } else {
+    analysis.categories = analysis.categories.map(category => {
+      if (!category || typeof category !== 'object') {
+        return makeFallbackCategory('General', 'warning', 72, 'Category data missing.', ['Ensure JSON matches schema.']);
+      }
+
+      const safeScore = clampNumber(category.score, 0, 100, 72);
+      const status = deriveStatusFromScore(safeScore);
+      const suggestions = Array.isArray(category.suggestions)
+        ? category.suggestions.filter(item => typeof item === 'string' && item.trim().length)
+        : [];
+
+      const originalName = category.name || 'General';
+      const cleanedName = !hasJobDescription && /job|role|match|alignment/i.test(originalName)
+        ? 'Keyword Optimization'
+        : originalName;
+
+      let cleanedFeedback = (category.feedback || '').trim();
+      let cleanedExplanation = (category.scoreExplanation || '').trim() || cleanedFeedback;
+      let cleanedSuggestions = suggestions.slice();
+
+      if (!hasJobDescription) {
+        cleanedFeedback = removeJobSpecificLanguage(cleanedFeedback);
+        cleanedExplanation = removeJobSpecificLanguage(cleanedExplanation);
+        cleanedSuggestions = cleanedSuggestions.filter(s => !containsJobSpecificLanguage(s));
+      }
+
+      cleanedFeedback = neutralizePrestigeBias(cleanedFeedback);
+      cleanedExplanation = neutralizePrestigeBias(cleanedExplanation);
+      cleanedSuggestions = cleanedSuggestions.map(text => enhanceSuggestionSpecificity(neutralizePrestigeBias(text))).filter(Boolean);
+
+      if (!cleanedFeedback) {
+        cleanedFeedback = generalFeedbackFallback(cleanedName);
+      }
+      if (!cleanedExplanation) {
+        cleanedExplanation = cleanedFeedback;
+      }
+      if (!cleanedSuggestions.length) {
+        cleanedSuggestions = [generalSuggestionFallback(cleanedName)];
+      }
+
+      return {
+        name: cleanedName,
+        status,
+        score: safeScore,
+        scoreExplanation: cleanedExplanation,
+        feedback: cleanedFeedback,
+        suggestions: cleanedSuggestions
+      };
+    });
+  }
+
+  if (!Array.isArray(analysis.extraInsights)) {
+    analysis.extraInsights = [];
+    fixes.push('extraInsights invalid; defaulted to empty array.');
+  } else {
+    analysis.extraInsights = analysis.extraInsights
+      .filter(item => typeof item === 'object' && ((item.title || '').trim().length || (item.details || '').trim().length))
+      .map(item => {
+        const tips = Array.isArray(item.tips) ? item.tips.filter(tip => typeof tip === 'string' && tip.trim().length) : [];
+        let cleanedTips = tips;
+        let cleanedDetails = neutralizePrestigeBias((item.details || '').trim());
+
+        if (!hasJobDescription) {
+          cleanedDetails = removeJobSpecificLanguage(cleanedDetails);
+          cleanedTips = tips.filter(tip => !containsJobSpecificLanguage(tip));
+        }
+
+        if (!cleanedDetails) {
+          cleanedDetails = 'Focus on clarity, measurable impact, and ATS-friendly formatting.';
+        }
+        cleanedTips = cleanedTips.map(tip => enhanceSuggestionSpecificity(neutralizePrestigeBias(tip))).filter(Boolean);
+        if (!cleanedTips.length) {
+          cleanedTips = ['Lead with quantifiable wins and keep formatting simple (no tables or graphics).'];
+        }
+
+        return {
+          title: (item.title || 'Insight').trim(),
+          status: ['good', 'warning', 'critical'].includes(item.status) ? item.status : 'warning',
+          details: cleanedDetails,
+          tips: cleanedTips
+        };
+      });
+  }
+
+  if (!Array.isArray(analysis.companyInsights)) {
+    analysis.companyInsights = [];
+    fixes.push('companyInsights invalid; defaulted to empty array.');
+  }
+
+  analysis.criticalKeywords = sanitizeCriticalKeywords(analysis.criticalKeywords, jobDescription, resumeText);
+
+  if (fixes.length) {
+    console.log('Analysis validation fixes applied:', fixes);
+  }
+
+  return analysis;
+}
+
+function clampNumber(value, min, max, fallback = min) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return fallback;
+  }
   return Math.min(max, Math.max(min, value));
 }
 
-// ---------------------------------------------------------------
-// Count bullets
-// ---------------------------------------------------------------
-function countBulletSymbols(text = "") {
-  const regex = createBulletRegex("g");
-  return (text.match(regex) || []).length;
+function deriveStatusFromScore(score) {
+  if (score >= 85) return 'good';
+  if (score >= 70) return 'warning';
+  return 'critical';
 }
 
-// ===============================================================
-//  NEW: Build Strength Summary — reveals what user does well
-// ===============================================================
-function buildStrengthSummary(text = "") {
-  const lower = text.toLowerCase();
+const JOB_DESCRIPTION_PATTERNS = [
+  /job description/i,
+  /job posting/i,
+  /this role/i,
+  /the role/i,
+  /role requirements?/i,
+  /hiring manager/i,
+  /position requirements?/i,
+  /align with the role/i
+];
 
-  const strengths = [];
-
-  if (lower.includes("led") || lower.includes("managed")) strengths.push("Leadership & ownership");
-  if (lower.includes("improved") || lower.includes("optimized")) strengths.push("Process improvement mindset");
-  if (lower.includes("kpi") || lower.includes("metric")) strengths.push("Data-driven approach");
-  if (lower.includes("cross") || lower.includes("partner")) strengths.push("Cross-functional collaboration");
-  if (lower.includes("customer") || lower.includes("client")) strengths.push("Customer-centric focus");
-
-  if (strengths.length === 0) strengths.push("Clear communication and consistent formatting.");
-
-  return strengths.join(", ") + ".";
+function containsJobSpecificLanguage(text = '') {
+  if (!text) {
+    return false;
+  }
+  return JOB_DESCRIPTION_PATTERNS.some(pattern => pattern.test(text));
 }
 
-// ===============================================================
-//  NEW: Skill Gap Analyzer (lightweight, part 1)
-//  Part 2 will be applied in Chunk C
-// ===============================================================
-function detectSkillGaps(jobText = "", resumeText = "") {
-  if (!jobText) return { count: 0, missing: [] };
-
-  const jobTokens = (jobText.toLowerCase().match(/[a-z0-9+]{3,}/g) || [])
-    .map(normalizeSkillToken);
-
-  const resumeTokens = new Set(
-    (resumeText.toLowerCase().match(/[a-z0-9+]{3,}/g) || []).map(normalizeSkillToken)
-  );
-
-  const missing = [];
-
-  HARD_SKILLS.forEach(skill => {
-    if (jobTokens.includes(skill) && !resumeTokens.has(skill)) {
-      missing.push(skill);
-    }
+function removeJobSpecificLanguage(text = '') {
+  if (!text) {
+    return '';
+  }
+  if (!containsJobSpecificLanguage(text)) {
+    return text;
+  }
+  let cleaned = text;
+  JOB_DESCRIPTION_PATTERNS.forEach(pattern => {
+    cleaned = cleaned.replace(pattern, 'target opportunities');
   });
-
-  SOFT_SKILLS.forEach(skill => {
-    if (jobTokens.includes(skill) && !resumeTokens.has(skill)) {
-      missing.push(skill);
-    }
-  });
-
-  return { count: missing.length, missing };
+  return cleaned.trim();
 }
 
-// ===============================================================
-//  Improved Critical Keyword Engine (Part 1)
-// ===============================================================
-function generateCriticalKeywords(jobDescription = "", resumeText = "") {
-  const combined = `${jobDescription} ${resumeText}`;
-  const lower = combined.toLowerCase();
-
-  const found = new Set();
-
-  // Direct library matches
-  CRITICAL_KEYWORD_LIBRARY.forEach(item => {
-    const matchHints = item.hints?.some(h => lower.includes(h.toLowerCase())) ?? false;
-    const matchRegex = item.patterns?.some(r => r.test(combined)) ?? false;
-    if (matchHints || matchRegex) found.add(item.phrase);
-  });
-
-  // Synonyms
-  KEYWORD_SYNONYM_PATTERNS.forEach(map => {
-    if (map.regex.test(combined)) found.add(map.phrase);
-  });
-
-  // Extractive method (2–3 token phrases)
-  extractKeyPhrasesFromText(combined, 20).forEach(x => found.add(x));
-
-  // Defaults
-  DEFAULT_CRITICAL_KEYWORDS.forEach(x => found.add(x));
-
-  return Array.from(found)
-    .map(canonicalizeKeywordPhrase)
-    .filter(Boolean)
-    .slice(0, 20);
-}
-
-// ---------------------------------------------------------------
-// Extractive keyphrase engine
-// ---------------------------------------------------------------
-function extractKeyPhrasesFromText(text = "", limit = 15) {
-  const tokens = text.toLowerCase().match(/[a-z0-9+]{2,}/g) || [];
-  const usable = tokens.map(t => ({
-    token: t,
-    keep:
-      !CRITICAL_KEYWORD_STOP_WORDS.has(t) &&
-      !CRITICAL_GENERIC_TERMS.has(t) &&
-      (CRITICAL_SHORT_TOKENS.has(t) || t.length > 3)
-  }));
-
-  const counts = {};
-  const add = arr => {
-    const phrase = canonicalizeKeywordPhrase(arr.join(" "));
-    if (!phrase) return;
-    counts[phrase] = (counts[phrase] || 0) + 1;
-  };
-
-  for (let i = 0; i < usable.length - 1; i++) {
-    const a = usable[i], b = usable[i + 1];
-    if (a.keep && b.keep) add([a.token, b.token]);
-
-    if (i < usable.length - 2) {
-      const c = usable[i + 2];
-      if (a.keep && b.keep && c.keep) add([a.token, b.token, c.token]);
-    }
+function generalSuggestionFallback(categoryName = '') {
+  const key = categoryName.toLowerCase();
+  if (key.includes('skill')) {
+    return 'List your most in-demand tools first and keep the section tight for quick scans.';
   }
-
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .map(([phrase]) => phrase)
-    .slice(0, limit);
-}
-// ===============================================================
-//  ATS SIGNAL ENGINE — Full scoring logic
-// ===============================================================
-function createAtsSignals(resumeText, jobDescription, structureSignals) {
-  const lowerResume = resumeText.toLowerCase();
-
-  // Word count
-  const words = lowerResume.split(/\s+/).filter(Boolean);
-  const wordCount = words.length;
-
-  // Numeric metrics detection
-  const numbers = resumeText.match(/\b\d[\d,\.%x+]*\b/g) || [];
-  const metricDensity = numbers.length;
-
-  // Bullet count
-  const bulletCount = countBulletSymbols(resumeText);
-
-  // Keyword match
-  const jobTokens = (jobDescription.toLowerCase().match(/[a-z]{4,}/g) || [])
-    .filter(tok => !CRITICAL_KEYWORD_STOP_WORDS.has(tok));
-  const resumeTokens = new Set(lowerResume.match(/[a-z]{4,}/g) || []);
-  let overlap = 0;
-  jobTokens.forEach(tok => {
-    if (resumeTokens.has(tok)) overlap++;
-  });
-
-  const keywordMatchScore = jobTokens.length ? overlap / jobTokens.length : 0;
-
-  // Acronym presence (ATS often wants spelled-out versions too)
-  const acronymScore = detectAcronymCompleteness(resumeText);
-
-  // Hard skill scoring
-  const hardSkillScore = HARD_SKILLS.filter(s => lowerResume.includes(s.toLowerCase())).length;
-
-  // Soft skill scoring
-  const softSkillScore = SOFT_SKILLS.filter(s => lowerResume.includes(s.toLowerCase())).length;
-
-  return {
-    wordCount,
-    metricDensity,
-    bulletCount,
-    keywordMatchScore,
-    hardSkillScore,
-    softSkillScore,
-    acronymScore,
-    timelineGaps: structureSignals.timelineGaps || [],
-    hasSummary: structureSignals.hasSummary,
-    hasEducation: structureSignals.hasEducation,
-    hasExperience: structureSignals.hasExperience
-  };
-}
-
-// ---------------------------------------------------------------
-// Acronym completeness — checks for (e.g., KPI → Key Performance Indicator)
-// ---------------------------------------------------------------
-function detectAcronymCompleteness(text = "") {
-  const pairs = [
-    ["kpi", /key performance indicators?/i],
-    ["sla", /service level agreements?/i],
-    ["roi", /return on investment/i],
-    ["tco", /total cost of ownership/i],
-    ["okrs?", /objectives and key results/i]
-  ];
-
-  let score = 0;
-  pairs.forEach(([acro, regex]) => {
-    const hasAcronym = text.toLowerCase().includes(acro);
-    const hasLongForm = regex.test(text);
-    if (hasAcronym && hasLongForm) score++;
-  });
-
-  return score;
-}
-
-// ===============================================================
-//  ATS WARNINGS — human readable suggestions
-// ===============================================================
-function buildAtsWarnings(signals) {
-  const warnings = [];
-
-  if (signals.wordCount < 280) {
-    warnings.push("Resume may be too short for mid-senior roles.");
+  if (key.includes('experience')) {
+    return 'Lead each bullet with an action verb and quantify the impact whenever possible.';
   }
-  if (signals.metricDensity < 3) {
-    warnings.push("Add more measurable achievements (%, $, time saved).");
+  if (key.includes('summary')) {
+    return 'Highlight 1-2 marquee achievements and core specialties in the opening lines.';
   }
-  if (signals.keywordMatchScore < 0.15) {
-    warnings.push("Resume does not strongly reflect job posting terminology.");
+  if (key.includes('keyword')) {
+    return 'Mirror the terminology recruiters use broadly (cloud, analytics, leadership) without overstuffing.';
   }
-  if (signals.bulletCount < 8) {
-    warnings.push("Add more bullet points to make accomplishments scannable.");
+  return 'Emphasize measurable wins and keep formatting easy to scan.';
+}
+
+function generalFeedbackFallback(categoryName = '') {
+  const key = categoryName.toLowerCase();
+  if (key.includes('skill')) {
+    return 'Skills are present; prioritize the ones that demonstrate depth and recent usage.';
   }
-  if (signals.acronymScore < 2) {
-    warnings.push("Spell out acronyms once for ATS readability.");
+  if (key.includes('experience')) {
+    return 'Experience section is strong—ensure each role includes scope, scale, and results.';
   }
-
-  return warnings;
-}
-
-// ===============================================================
-//  ATS DIAGNOSTIC CARD — extra insights section
-// ===============================================================
-function generateAtsInsightCard(signals) {
-  return {
-    title: "ATS Diagnostics",
-    status: signals.keywordMatchScore > 0.25 ? "good" : "warning",
-    details: `Your resume contains ${signals.metricDensity} measurable metrics, ${signals.bulletCount} bullets, and matches ${(signals.keywordMatchScore * 100).toFixed(0)}% of job terminology.`,
-    tips: [
-      "Add quantifiable metrics where possible.",
-      "Spell out acronyms at least once.",
-      "Mirror job posting keywords in your summary and bullets."
-    ]
-  };
-}
-
-// ===============================================================
-//  STRUCTURE SIGNALS — detect sections, timeline gaps, layout
-// ===============================================================
-function deriveResumeStructureSignals(text = "") {
-  const lower = text.toLowerCase();
-
-  const hasSummary = /\bsummary\b/.test(lower);
-  const hasExperience = /\bexperience\b/.test(lower);
-  const hasEducation = /\beducation\b/.test(lower);
-
-  // Timeline detection (YYYY–YYYY)
-  const dates = text.match(/\b(19|20)\d{2}\b/g) || [];
-  const timelineGaps = [];
-  if (dates.length > 1) {
-    const sorted = dates.map(Number).sort((a, b) => b - a);
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const gap = sorted[i] - sorted[i + 1];
-      if (gap > 3) timelineGaps.push({ from: sorted[i], to: sorted[i + 1], gap });
-    }
+  if (key.includes('summary')) {
+    return 'Summary sets the tone; keep it concise and packed with high-impact metrics.';
   }
-
-  return {
-    hasSummary,
-    hasExperience,
-    hasEducation,
-    timelineGaps
-  };
-}
-
-// ===============================================================
-//  STRUCTURE INSIGHT CARD
-// ===============================================================
-function generateStructureInsightCard(structure) {
-  return {
-    title: "Structure & Timeline",
-    status: structure.timelineGaps.length ? "warning" : "good",
-    details: structure.timelineGaps.length
-      ? "Large unexplained employment gaps detected."
-      : "No major timeline gaps detected.",
-    tips: structure.timelineGaps.length
-      ? ["Explain timeline gaps in your summary or highlight transitions."]
-      : ["Continue maintaining a clear chronological layout."]
-  };
-}
-
-// ===============================================================
-//  MISSING BULLET GENERATOR — fallback + AI-ready
-// ===============================================================
-function generateMissingBullets(resumeText = "") {
-  // Detect if bullets lacking metrics
-  const lines = resumeText.split(/\n|-/).map(l => l.trim()).filter(Boolean);
-  const weak = lines.filter(l => l.length < 35 || !/\d/.test(l));
-
-  const examples = [
-    "Reduced processing time by 22% through workflow optimization.",
-    "Coordinated cross-functional teams to deliver projects ahead of schedule.",
-    "Implemented data-driven decisions resulting in improved KPIs.",
-    "Standardized reporting processes to enhance leadership visibility.",
-    "Managed stakeholder alignment across multiple departments."
-  ];
-
-  if (weak.length < 3) return [];
-
-  return examples.slice(0, 3);
-}
-
-// ===============================================================
-//  RESUME COMPLETENESS ENFORCER — ensures mandatory sections
-// ===============================================================
-function enforceResumeCompleteness(analysis, resumeText, structure) {
-  if (!analysis || typeof analysis !== "object") return analysis;
-
-  if (!structure.hasSummary) {
-    analysis.extraInsights = analysis.extraInsights || [];
-    analysis.extraInsights.push({
-      title: "Missing Summary",
-      status: "warning",
-      details: "A professional summary was not detected.",
-      tips: ["Add a concise summary that outlines your leadership scope, domain expertise, and measurable impact."]
-    });
+  if (key.includes('keyword')) {
+    return 'Optimize phrasing for ATS by using standard titles and spelling out acronyms once.';
   }
-  if (!structure.hasEducation) {
-    analysis.extraInsights = analysis.extraInsights || [];
-    analysis.extraInsights.push({
-      title: "Education Section Missing",
-      status: "warning",
-      details: "Education section not detected.",
-      tips: ["Include degrees, certifications, or relevant training programs."]
-    });
+  return 'Keep the section concise, metric-driven, and easy for recruiters to scan quickly.';
+}
+
+function neutralizePrestigeBias(text = '') {
+  if (!text) {
+    return '';
   }
-
-  return analysis;
+  let cleaned = text;
+  cleaned = cleaned.replace(/lacks? (?:a )?prestig(?:e|ious) (?:degree|education)/gi, 'Lean into measurable achievements, certifications, and leadership scope to prove readiness.');
+  cleaned = cleaned.replace(/no (?:ivy[- ]league|top[- ]tier) degree/gi, 'Highlight continuing education, executive programs, or credentials tied to the role.');
+  return cleaned.trim();
 }
 
-// ===============================================================
-//  Positive Signal Boost — identifies strong resumes & adjusts score
-// ===============================================================
-function applyPositiveSignalBoost(analysis, resumeText, structure) {
-  const lower = resumeText.toLowerCase();
-  let boost = 0;
-
-  if (/led|managed|owned|directed/.test(lower)) boost += 3;
-  if (/improved|optimized|increased|reduced/.test(lower)) boost += 3;
-  if (structure.timelineGaps.length === 0) boost += 2;
-
-  analysis.overallScore = clamp(analysis.overallScore + boost, 50, 100);
-  return analysis;
-}
-
-// ===============================================================
-//  JOB-SPECIFIC LANGUAGE CLEANER (improved)
-// ===============================================================
-function containsJobSpecificLanguage(text = "") {
-  const patterns = [
-    /job description/i,
-    /job posting/i,
-    /this role/i,
-    /the role/i,
-    /role requirements?/i,
-    /hiring manager/i,
-    /position requirements?/i,
-    /align with the role/i
-  ];
-  return patterns.some(p => p.test(text));
-}
-
-function removeJobSpecificLanguage(text = "") {
-  if (!text) return "";
-  if (!containsJobSpecificLanguage(text)) return text;
-  return text.replace(/job description|job posting|this role|the role|role requirements?/gi, "target opportunities");
-}
-
-// ===============================================================
-//  Prestige Bias Neutralizer — improved & condensed
-// ===============================================================
-function neutralizePrestigeBias(text = "") {
-  if (!text) return "";
-
-  return text
-    .replace(/prestigious degree|top[- ]tier school|ivy[- ]league/i,
-      "professional accomplishments and measurable impact")
-    .trim();
-}
-
-// ===============================================================
-//  Suggestion Specificity Enhancer — adds examples
-// ===============================================================
-function enhanceSuggestionSpecificity(text = "") {
-  if (!text) return "";
-  const dataPattern = /(analytics?|data|insight)/i;
-  if (dataPattern.test(text)) {
-    return `${text.replace(/\.*$/, "")}. Examples: SQL, Tableau, Power BI, Python.`;
+function enhanceSuggestionSpecificity(text = '') {
+  if (!text) {
+    return '';
   }
-  return text;
+  let updated = text.trim();
+  const analyticsToolPattern = /(add|list|highlight)[^\.]{0,80}(tools|software)[^\.]{0,80}(data|analytics)/i;
+  if (analyticsToolPattern.test(updated)) {
+    updated = `${updated.replace(/\.*$/, '')}. Examples: Tableau, Power BI, SQL, Python, Snowflake, Looker.`;
+  }
+  return updated;
 }
 
-// ===============================================================
-//  Category Sanitization — consolidates repeated logic
-// ===============================================================
 function sanitizeCriticalKeywords(keywords, jobSource, resumeSource) {
   let list = Array.isArray(keywords) ? keywords : [];
-
   list = list
-    .map(k => canonicalizeKeywordPhrase(k))
-    .filter(Boolean);
+    .map(item => typeof item === 'string' ? item.trim() : '')
+    .filter(item => item.length > 0);
 
-  // Supplement if fewer than 6
-  if (list.length < 6) {
-    const supplement = generateCriticalKeywords(jobSource, resumeSource);
-    supplement.forEach(k => {
-      if (list.length < 15 && !list.includes(k)) list.push(k);
+  if (list.length < 5) {
+    const supplements = generateCriticalKeywords(jobSource, resumeSource);
+    supplements.forEach(keyword => {
+      if (list.length < 15 && !list.includes(keyword)) {
+        list.push(keyword);
+      }
     });
   }
 
   return list.slice(0, 15);
 }
-// ===============================================================
-//  VALIDATE + FIX ANALYSIS OBJECT — ensures clean structure
-// ===============================================================
-function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
-  if (!analysis || typeof analysis !== "object") {
-    return createFallbackAnalysis(resumeText, Boolean(jobDescription), jobDescription);
+
+function generateCriticalKeywords(jobDescription = '', resumeText = '') {
+  const source = `${jobDescription || ''}\n${resumeText || ''}`;
+  const lowerSource = source.toLowerCase();
+  const keywords = [];
+
+  const addKeyword = phrase => {
+    const canonical = canonicalizeKeywordPhrase(phrase);
+    if (canonical && !keywords.includes(canonical)) {
+      keywords.push(canonical);
+    }
+  };
+
+  CRITICAL_KEYWORD_LIBRARY.forEach(entry => {
+    const hintMatch = (entry.hints || []).some(hint => lowerSource.includes(hint.toLowerCase()));
+    const patternMatch = (entry.patterns || []).some(pattern => pattern.test(source));
+    if (hintMatch || patternMatch) {
+      addKeyword(entry.phrase);
+    }
+  });
+
+  KEYWORD_SYNONYM_PATTERNS.forEach(mapping => {
+    if (mapping.regex.test(source)) {
+      addKeyword(mapping.phrase);
+    }
+  });
+
+  extractKeyPhrasesFromText(jobDescription || resumeText, 25).forEach(addKeyword);
+  DEFAULT_CRITICAL_KEYWORDS.forEach(addKeyword);
+
+  return keywords.slice(0, 20);
+}
+
+function extractKeyPhrasesFromText(text = '', limit = 15) {
+  if (!text || typeof text !== 'string') {
+    return [];
   }
 
-  const fixes = [];
-  const hasJob = Boolean(jobDescription && jobDescription.trim());
-
-  // -----------------------------
-  // Fix overall score
-  // -----------------------------
-  if (typeof analysis.overallScore !== "number") {
-    analysis.overallScore = 75;
-    fixes.push("overallScore missing; default set to 75");
+  const tokens = text.toLowerCase().match(/\b[a-z0-9+]{2,}\b/g);
+  if (!tokens) {
+    return [];
   }
 
-  // -----------------------------
-  // Fix categories
-  // -----------------------------
-  if (!Array.isArray(analysis.categories)) {
-    analysis.categories = [];
-    fixes.push("categories missing; default empty array");
-  }
+  const processed = tokens.map(token => ({
+    token,
+    keep: shouldKeepCriticalToken(token)
+  }));
 
-  if (analysis.categories.length === 0) {
-    analysis.categories = createFallbackAnalysis(resumeText, hasJob, jobDescription).categories;
-    fixes.push("categories empty; fallback applied");
-  } else {
-    analysis.categories = analysis.categories.map(cat => {
-      if (!cat || typeof cat !== "object") {
-        return {
-          name: "General",
-          score: 72,
-          status: "warning",
-          feedback: "Category data missing.",
-          suggestions: ["Ensure JSON matches expected schema."]
-        };
+  const counts = {};
+  const addPhrase = phraseTokens => {
+    const phrase = phraseTokens.join(' ');
+    counts[phrase] = (counts[phrase] || 0) + 1;
+  };
+
+  for (let i = 0; i < processed.length - 1; i++) {
+    const first = processed[i];
+    const second = processed[i + 1];
+    if (first.keep && second.keep) {
+      addPhrase([first.token, second.token]);
+    }
+    if (i < processed.length - 2) {
+      const third = processed[i + 2];
+      if (first.keep && second.keep && third.keep) {
+        addPhrase([first.token, second.token, third.token]);
       }
-
-      const score = clampNumber(cat.score, 0, 100, 72);
-      const status = deriveStatusFromScore(score);
-
-      // Clean feedback / suggestions of job-specific phrasing
-      let feedback = (cat.feedback || "").trim();
-      let suggestions = Array.isArray(cat.suggestions) ? cat.suggestions : [];
-
-      if (!hasJob) {
-        feedback = removeJobSpecificLanguage(feedback);
-        suggestions = suggestions.filter(s => !containsJobSpecificLanguage(s));
-      }
-
-      // Prestige bias removal
-      feedback = neutralizePrestigeBias(feedback);
-      suggestions = suggestions.map(s => neutralizePrestigeBias(s));
-
-      // Suggestion specificity
-      suggestions = suggestions.map(s => enhanceSuggestionSpecificity(s));
-
-      if (!feedback) feedback = "Focus on measurable achievements and clear formatting.";
-      if (suggestions.length === 0) suggestions = ["Add measurable achievements and improve phrasing."];
-
-      return {
-        name: cat.name || "General",
-        status,
-        score,
-        feedback,
-        suggestions
-      };
-    });
+    }
   }
 
-  // -----------------------------
-  // Fix extra insights
-  // -----------------------------
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+    .map(([phrase]) => canonicalizeKeywordPhrase(phrase))
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function shouldKeepCriticalToken(token) {
+  if (!token) {
+    return false;
+  }
+  if (CRITICAL_KEYWORD_STOP_WORDS.has(token) || CRITICAL_GENERIC_TERMS.has(token)) {
+    return false;
+  }
+  if (CRITICAL_SHORT_TOKENS.has(token)) {
+    return true;
+  }
+  return token.length >= 4;
+}
+
+function canonicalizeKeywordPhrase(raw = '') {
+  if (!raw) {
+    return '';
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return '';
+  }
+  for (const mapping of KEYWORD_SYNONYM_PATTERNS) {
+    if (mapping.regex.test(trimmed)) {
+      return mapping.phrase;
+    }
+  }
+  return toTitleCase(trimmed.replace(/\s+/g, ' '));
+}
+
+function toTitleCase(text = '') {
+  return text.toLowerCase().replace(/\b([a-z])/g, (_, char) => char.toUpperCase());
+}
+
+function escapeRegex(value = '') {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countBulletSymbols(text = '') {
+  if (!text || typeof text !== 'string') {
+    return 0;
+  }
+
+  const normalized = normalizeBulletGlyphs(text);
+  const lineStartPattern = /(?:^|[\r\n\u2028\u2029])\s*(?:[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧]|\d+\.|[a-zA-Z]\))/g;
+  const bulletCharPattern = createBulletRegex('g');
+
+  const lineMatches = normalized.match(lineStartPattern) || [];
+  const inlineMatches = normalized.match(bulletCharPattern) || [];
+  const explicitCount = lineMatches.length || inlineMatches.length || 0;
+
+  if (explicitCount >= 4) {
+    return explicitCount;
+  }
+
+  const implicitCount = estimateImplicitBulletCount(normalized);
+  return implicitCount || explicitCount;
+}
+
+function normalizeBulletGlyphs(text) {
+  if (!text) {
+    return '';
+  }
+
+  return text
+    .replace(/â€¢|Ã¢â‚¬Â¢|Â·|·|∙|⋅|●|◦|▪|▫|▪️|▫️|||▪︎|‣|•|\u2022|\u25cf|\u25cb|\u25a0|\u25aa|\u25ab|\u2219|\uf0b7|➤|➔|➣|➥|➧|➨|➩|➪|➫|➬|➭|➮|➯|➱|➲|➳|➵|➸|➼|➽|➾|▶|►|▸|▹/gi, '•')
+    .replace(/â€“|â€”|–|—|−/g, '-')
+    .replace(/•\s*(?=[A-Za-z])/g, '• ');
+}
+
+function estimateImplicitBulletCount(text = '') {
+  if (!text) {
+    return 0;
+  }
+
+  const lines = text.split(/(?:\r?\n|\u2028|\u2029)/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) {
+    return 0;
+  }
+
+  const actionVerbPattern = /^(grew|improved|increased|reduced|led|managed|oversaw|designed|built|launched|developed|implemented|optimized|delivered|drove|owned|created|introduced|executed|achieved|coordinated|partnered|spearheaded|streamlined|built|directed|orchestrated|transformed|modernized|enhanced|boosted)/i;
+  let implicitCount = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.length > 220) {
+      continue;
+    }
+
+    const looksLikeBullet =
+      actionVerbPattern.test(line) ||
+      /[0-9%$+]/.test(line) ||
+      line.split(/\s+/).length <= 14;
+
+    if (!looksLikeBullet) {
+      continue;
+    }
+
+    const prevLine = lines[i - 1] || '';
+    const separatedFromParagraph = !prevLine || prevLine.length > 220 || /[:.;!?]$/.test(prevLine);
+
+    if (separatedFromParagraph) {
+      implicitCount += 1;
+    }
+  }
+
+  return implicitCount >= 4 ? implicitCount : 0;
+}
+
+function enforceResumeCompleteness(analysis, resumeText = '', structureSignals = null) {
+  const text = typeof resumeText === 'string' ? resumeText : '';
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  const hasEmail = /@/.test(text);
+  const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(text);
+  const hasSections = structureSignals
+    ? ['summary', 'experience', 'skills', 'education'].some(section =>
+        structureSignals.headings?.some(heading => heading.toLowerCase().includes(section))
+      )
+    : /(experience|summary|education|skills)/i.test(text);
+  const bulletCount = structureSignals?.bulletLines ?? countBulletSymbols(text);
+
+  let penalty = 0;
+  const tips = [];
+
+  if (wordCount < 150) {
+    penalty += 30;
+    tips.push('Expand the resume beyond a short paragraph—target at least 400 words.');
+  } else if (wordCount < 250) {
+    penalty += 20;
+    tips.push('Add more depth; hiring teams expect multi-section resumes.');
+  }
+
+  if (!hasEmail || !hasPhone) {
+    penalty += 8;
+    tips.push('Include both an email address and phone number in the header.');
+  }
+
+  if (!hasSections) {
+    penalty += 10;
+    tips.push('Add clear headings such as Summary, Experience, Skills, and Education.');
+  }
+
+  if (bulletCount < 3) {
+    penalty += 7;
+    tips.push('Use bullet points to describe achievements—paragraphs alone are hard to scan.');
+  }
+
+  if (!penalty) {
+    return analysis;
+  }
+
+  analysis.overallScore = Math.max(25, analysis.overallScore - penalty);
+
   if (!Array.isArray(analysis.extraInsights)) {
     analysis.extraInsights = [];
-    fixes.push("extraInsights invalid; default empty array");
-  } else {
-    analysis.extraInsights = analysis.extraInsights
-      .filter(ins => ins && (ins.title || ins.details))
-      .map(ins => {
-        let details = neutralizePrestigeBias(ins.details || "");
-        let tips = Array.isArray(ins.tips) ? ins.tips : [];
-
-        if (!hasJob) {
-          details = removeJobSpecificLanguage(details);
-          tips = tips.filter(t => !containsJobSpecificLanguage(t));
-        }
-
-        tips = tips.map(t => enhanceSuggestionSpecificity(t));
-
-        if (!details) details = "Focus on clarity, impact, and ATS readability.";
-        if (tips.length === 0) tips = ["Lead bullets with verbs and quantify wins."];
-
-        return {
-          title: ins.title || "Insight",
-          status: ["good","warning","critical"].includes(ins.status) ? ins.status : "warning",
-          details,
-          tips
-        };
-      });
   }
 
-  // -----------------------------
-  // Fix company insights
-  // -----------------------------
-  if (!Array.isArray(analysis.companyInsights)) {
-    analysis.companyInsights = [];
-    fixes.push("companyInsights invalid; default empty array");
-  }
-
-  // -----------------------------
-  // Final keyword sanitation
-  // -----------------------------
-  analysis.criticalKeywords = sanitizeCriticalKeywords(
-    analysis.criticalKeywords,
-    jobDescription,
-    resumeText
-  );
-
-  if (fixes.length) console.log("Validation fixes applied:", fixes);
+  analysis.extraInsights.unshift({
+    title: 'Resume Completeness',
+    status: penalty >= 25 ? 'critical' : 'warning',
+    details: 'Detected missing fundamentals (length, contact info, standard sections, or bullet formatting).',
+    tips: tips.length ? tips : ['Add standard resume sections and contact details before running another analysis.']
+  });
 
   return analysis;
 }
 
-// Utility functions reused above
-function clampNumber(value, min, max, fallback) {
-  if (typeof value !== "number" || Number.isNaN(value)) return fallback;
-  return Math.min(max, Math.max(min, value));
-}
-function deriveStatusFromScore(score) {
-  if (score >= 85) return "good";
-  if (score >= 70) return "warning";
-  return "critical";
+function applyPositiveSignalBoost(analysis, resumeText = '', structureSignals = null) {
+  if (!analysis || typeof analysis !== 'object') {
+    return analysis;
+  }
+
+  const signals = detectPositiveSignals(resumeText);
+  const structureHighlights = [];
+  if (structureSignals?.bulletLines >= 10) {
+    structureHighlights.push('High number of concise bullets detected.');
+  }
+  if (structureSignals?.timelineEntries >= 3) {
+    structureHighlights.push('Career timeline consistently documented.');
+  }
+
+  const { boost, highlights } = calculatePositiveBoost(signals);
+  const mergedHighlights = [...highlights, ...structureHighlights].filter(Boolean);
+  if (!boost) {
+    return analysis;
+  }
+
+  const baseScore = typeof analysis.overallScore === 'number' ? analysis.overallScore : 75;
+  analysis.overallScore = Math.min(100, baseScore + boost);
+
+  if (!Array.isArray(analysis.extraInsights)) {
+    analysis.extraInsights = [];
+  }
+
+  const executiveInsight = buildExecutiveStrengthInsight(signals, boost, mergedHighlights);
+  if (executiveInsight) {
+    const existingIndex = analysis.extraInsights.findIndex(item => item && item.title === executiveInsight.title);
+    if (existingIndex >= 0) {
+      analysis.extraInsights[existingIndex] = executiveInsight;
+    } else {
+      analysis.extraInsights.push(executiveInsight);
+    }
+  }
+
+  return analysis;
 }
 
-// ===============================================================
-//  MAIN HANDLER — FINAL RETURN PIPELINE
-// ===============================================================
-export default async function handler(req, res) {
+function detectPositiveSignals(resumeText = '') {
+  const text = typeof resumeText === 'string' ? resumeText : '';
+  const metricsRegex = /\b\$?\d{1,3}(?:[,\.\d]{0,6})?(?:%|\+|x| million|bn|m)?\b/gi;
+  const leadershipRegex = /\b(led|lead|leading|oversaw|managed|supervised|directed|orchestrated|spearheaded)\b/gi;
+  const executiveRegex = /\b(vice president|vp|executive director|chief|c[- ]level|head of|senior director)\b/gi;
+  const innovationRegex = /\b(ai|machine learning|ml|automation|analytics platform|data strategy|digital transformation)\b/gi;
+
+  return {
+    metricsCount: (text.match(metricsRegex) || []).length,
+    leadershipMentions: (text.match(leadershipRegex) || []).length,
+    executiveMentions: (text.match(executiveRegex) || []).length,
+    innovationMentions: (text.match(innovationRegex) || []).length
+  };
+}
+
+function calculatePositiveBoost(signals) {
+  if (!signals) {
+    return { boost: 0, highlights: [] };
+  }
+
+  let boost = 0;
+  const highlights = [];
+
+  if (signals.metricsCount >= 10) {
+    boost += 4;
+    highlights.push('Heavy quantification throughout the resume.');
+  } else if (signals.metricsCount >= 5) {
+    boost += 2;
+    highlights.push('Consistent use of metrics.');
+  }
+
+  if (signals.leadershipMentions >= 6) {
+    boost += 3;
+    highlights.push('Multiple leadership verbs detected.');
+  } else if (signals.leadershipMentions >= 3) {
+    boost += 1;
+    highlights.push('Clear leadership language present.');
+  }
+
+  if (signals.executiveMentions >= 3) {
+    boost += 2;
+    highlights.push('Executive-level titles called out.');
+  } else if (signals.executiveMentions >= 1) {
+    boost += 1;
+    highlights.push('Senior scope highlighted.');
+  }
+
+  if (signals.innovationMentions >= 4) {
+    boost += 2;
+    highlights.push('Innovation/AI initiatives emphasized.');
+  } else if (signals.innovationMentions >= 2) {
+    boost += 1;
+    highlights.push('Digital transformation themes identified.');
+  }
+
+  return {
+    boost: Math.min(10, boost),
+    highlights
+  };
+}
+
+function buildExecutiveStrengthInsight(signals, boost, highlights = []) {
+  if (!boost) {
+    return null;
+  }
+
+  const detailParts = [];
+  if (signals.metricsCount) detailParts.push(`${signals.metricsCount} quantified wins`);
+  if (signals.leadershipMentions) detailParts.push(`${signals.leadershipMentions} leadership cues`);
+  if (signals.innovationMentions) detailParts.push(`${signals.innovationMentions} innovation mentions`);
+
+  const details = detailParts.length
+    ? `Detected ${detailParts.join(', ')}. Score boosted +${boost} to reflect executive impact.`
+    : `Score boosted +${boost} to reflect strong executive signaling.`;
+
+  const tips = highlights.length ? highlights : ['Keep spotlighting measurable outcomes, timelines, and strategic initiatives.'];
+
+  return {
+    title: 'Executive Strengths',
+    status: 'good',
+    details,
+    tips
+  };
+}
+
+function createStandardPrompt(resumeText) {
+  return `Analyze this resume and provide feedback in JSON format. Deliver actionable insights about strengths, risks, missing metrics, and recruiter perception. Respond with JSON only.
+
+Resume Text:
+"""
+${resumeText}
+"""
+
+Return JSON with keys: overallScore (0-100), categories (array of name, status, score, feedback, suggestions[]), companyInsights (array with 0-2 concise insights that highlight how the candidate shows up to employers), extraInsights (array), criticalKeywords (array of 15 phrases), and include specific ATS-related tips. Cite concrete examples or metrics whenever they appear.`;
+}
+
+function createJobMatchingPrompt(resumeText, jobDescription) {
+  return `Analyze this resume AGAINST the provided job description. Return JSON only with the same schema as before (overallScore, categories, companyInsights, extraInsights, criticalKeywords). Highlight keyword gaps, measurable wins, and ATS alignment.
+
+CompanyInsights must include 1-3 bullet-style entries that tie the candidate's experience directly to the job/company details when a description is provided.
+
+Resume Text:
+"""
+${resumeText}
+"""
+
+Job Description:
+"""
+${jobDescription}
+"""`;
+}
+
+function createAtsSignals(resumeText, jobDescription, structureSignals = null) {
+  const rawResume = typeof resumeText === 'string' ? resumeText : '';
+  const rawJob = typeof jobDescription === 'string' ? jobDescription : '';
+  const safeResume = rawResume.toLowerCase();
+  const safeJob = rawJob.toLowerCase();
+  const hasJobDescription = rawJob.trim().length > 0;
+  const signals = {
+    tablesDetected: /<table|\btable\b/i.test(resumeText),
+    imagesDetected: /<img|\.(png|jpg|jpeg|gif)\b/i.test(resumeText),
+    columnsDetected: /column/i.test(resumeText),
+    pdfIndicators: /adobe|acrobat|pdf/i.test(resumeText),
+    keywordOverlap: hasJobDescription ? compareJobKeywords(safeJob, safeResume) : 0,
+    metricsCount: (rawResume.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length,
+    bulletSymbols: countBulletSymbols(rawResume),
+    uppercaseSections: (rawResume.match(/\n[A-Z\s]{6,}\n/g) || []).length,
+    hasJobDescription,
+    structure: structureSignals || deriveResumeStructureSignals(rawResume)
+  };
+  return signals;
+}
+
+function buildAtsWarnings(signals) {
+  const warnings = [];
+  if (signals.tablesDetected) warnings.push('Tables detected—ATS may skip table content.');
+  if (signals.imagesDetected) warnings.push('Images/logos offer no text for ATS. Replace with plain text.');
+  if (signals.columnsDetected) warnings.push('Multi-column layouts can scramble reading order.');
+  if (signals.hasJobDescription && signals.keywordOverlap < 0.3) {
+    warnings.push('Fewer than 30% of job keywords echoed in resume.');
+  }
+  if (signals.metricsCount < 3) warnings.push('Add more quantified achievements (numbers or KPIs).');
+  if (signals.bulletSymbols < 4) warnings.push('Use bullet points for scannability (4+ recommended).');
+  if (signals.structure) {
+    if (signals.structure.missingCoreSections?.length) {
+      warnings.push(`Add clear headings for ${signals.structure.missingCoreSections.join(', ')}.`);
+    }
+    if ((signals.structure.timelineEntries || 0) < 2 && (signals.structure.standaloneYears || 0) < 2) {
+      warnings.push('List date ranges (e.g., 2019–2024) beside each role to show career continuity.');
+    }
+    if ((signals.structure.denseParagraphs || 0) >= 3 && (signals.structure.bulletLines || 0) < 5) {
+      warnings.push('Break dense paragraphs into shorter bullet points for readability.');
+    }
+  }
+  return warnings;
+}
+
+function generateAtsInsightCard(signals) {
+  if (!signals) {
+    return null;
+  }
+
+  const hasJob = Boolean(signals.hasJobDescription);
+  const detailParts = [];
+  if (hasJob) {
+    detailParts.push(`Keyword overlap ${(signals.keywordOverlap * 100).toFixed(0)}%`);
+  }
+  detailParts.push(`metrics ${signals.metricsCount}`);
+  detailParts.push(`bullets ${signals.bulletSymbols}`);
+  if (signals.structure?.headings?.length) {
+    detailParts.push(`sections ${signals.structure.headings.length}`);
+  }
+
+  let status;
+  if (hasJob) {
+    status = signals.keywordOverlap >= 0.45 ? 'good' : signals.keywordOverlap >= 0.25 ? 'warning' : 'critical';
+  } else if (signals.metricsCount >= 3 && signals.bulletSymbols >= 4) {
+    status = 'good';
+  } else if (signals.metricsCount >= 2 || signals.bulletSymbols >= 2) {
+    status = 'warning';
+  } else {
+    status = 'critical';
+  }
+
+  return {
+    title: 'ATS Diagnostics',
+    status,
+    details: detailParts.join(', '),
+    tips: buildAtsWarnings(signals)
+  };
+}
+
+async function hydrateJobDescription(rawInput = '') {
+  const trimmed = (rawInput || '').trim();
+  if (!trimmed) {
+    return { text: '', source: 'none', fetchedFrom: null, error: null };
+  }
+
+  if (!isProbablyUrl(trimmed)) {
+    return { text: trimmed, source: 'manual', fetchedFrom: null, error: null };
+  }
+
+  const { primaryUrl, fallbackUrl } = resolveLinkedInJobUrls(trimmed);
+
   try {
-    applyCors(req, res);
+    const html = await fetchJobPostingSource(primaryUrl);
+    if (!html) {
+      return { text: '', source: 'url', fetchedFrom: primaryUrl, error: 'Job page returned no content.' };
+    }
+    const extracted = extractLinkedInJobDescription(html);
+    if (extracted) {
+      return { text: extracted, source: 'linkedin', fetchedFrom: primaryUrl, error: null };
+    }
+
+    if (fallbackUrl) {
+      const fallbackHtml = await fetchJobPostingSource(fallbackUrl);
+      if (fallbackHtml) {
+        const fallbackExtracted = extractLinkedInJobDescription(fallbackHtml);
+        if (fallbackExtracted) {
+          return { text: fallbackExtracted, source: 'linkedin', fetchedFrom: fallbackUrl, error: null };
+        }
+      }
+    }
+    return { text: '', source: 'url', fetchedFrom: primaryUrl, error: 'Unable to extract description from job page.' };
   } catch (error) {
-    console.log("CORS error:", error);
-    return res.status(500).json({ error: "Server configuration error" });
-  }
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  try {
-    const { resumeText, jobDescription, hydrateOnly = false } = req.body || {};
-
-    const safeResume = typeof resumeText === "string" ? resumeText : "";
-    const safeJob = typeof jobDescription === "string" ? jobDescription : "";
-
-    // -----------------------------------------------------
-    // Hydrate job description
-    // -----------------------------------------------------
-    const {
-      text: hydratedJob,
-      source: jobSource,
-      fetchedFrom: jobUrl,
-      error: jobError
-    } = await hydrateJobDescription(safeJob);
-
-    const normalizedResume = normalizeResumeContent(safeResume);
-    const normalizedJob = normalizeResumeContent(hydratedJob || "");
-    const hasResolvedJob = normalizedJob && normalizedJob.trim().length > 20;
-
-    if (hydrateOnly) {
-      return res.status(200).json({
-        success: Boolean(hasResolvedJob || !jobError),
-        jobMatched: hasResolvedJob,
-        jobDescriptionResolved: normalizedJob,
-        jobDescriptionSource: jobSource,
-        jobDescriptionUrl: jobUrl,
-        jobDescriptionError: jobError,
-        structureSignals: null,
-        fallbackUsed: false,
-        fallbackReason: null
-      });
-    }
-
-    if (!safeResume || safeResume.trim().length < 50) {
-      return res.status(400).json({ error: "Resume text must be at least 50 characters." });
-    }
-
-    // -----------------------------------------------------
-    // Structure Analysis
-    // -----------------------------------------------------
-    const resumeStructure = deriveResumeStructureSignals(normalizedResume);
-
-    // -----------------------------------------------------
-    // AI Analysis or Fallback
-    // -----------------------------------------------------
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    if (!OPENAI_API_KEY) {
-      return res.status(500).json({ error: "Server missing OpenAI key" });
-    }
-
-    const prompt = hasResolvedJob
-      ? createJobMatchingPrompt(normalizedResume, normalizedJob)
-      : createStandardPrompt(normalizedResume);
-
-    const { analysis: rawAnalysis, fallbackUsed, fallbackReason } = await generateAnalysis(
-      prompt,
-      normalizedResume,
-      normalizedJob,
-      OPENAI_API_KEY
-    );
-
-    // -----------------------------------------------------
-    // Validation, structure & ATS scoring
-    // -----------------------------------------------------
-    let validated = validateAndFixAnalysis(rawAnalysis, normalizedResume, normalizedJob);
-    validated = enforceResumeCompleteness(validated, normalizedResume, resumeStructure);
-    validated = applyPositiveSignalBoost(validated, normalizedResume, resumeStructure);
-
-    const atsSignals = createAtsSignals(normalizedResume, normalizedJob, resumeStructure);
-    validated.atsSignals = atsSignals;
-    validated.atsWarnings = buildAtsWarnings(atsSignals);
-    validated.structureSignals = resumeStructure;
-
-    // -----------------------------------------------------
-    // Add ATS insight card
-    // -----------------------------------------------------
-    const atsCard = generateAtsInsightCard(atsSignals);
-    if (atsCard) {
-      validated.extraInsights = validated.extraInsights || [];
-      const existing = validated.extraInsights.findIndex(x => x.title === "ATS Diagnostics");
-      if (existing >= 0) validated.extraInsights[existing] = atsCard;
-      else validated.extraInsights.push(atsCard);
-    }
-
-    // -----------------------------------------------------
-    // Add structure insight card
-    // -----------------------------------------------------
-    const structureCard = generateStructureInsightCard(resumeStructure);
-    validated.extraInsights = validated.extraInsights || [];
-    const sIdx = validated.extraInsights.findIndex(x => x.title === "Structure & Timeline");
-    if (sIdx >= 0) validated.extraInsights[sIdx] = structureCard;
-    else validated.extraInsights.push(structureCard);
-
-    // -----------------------------------------------------
-    // Missing bullet generator
-    // -----------------------------------------------------
-    const missingBullets = generateMissingBullets(normalizedResume);
-    if (missingBullets.length) {
-      validated.extraInsights.push({
-        title: "Suggested Bullet Improvements",
-        status: "warning",
-        details: "Some bullets may lack strength or measurable outcomes.",
-        tips: missingBullets
-      });
-    }
-
-    // -----------------------------------------------------
-    // FINAL: keyword list for highlighting UI
-    // -----------------------------------------------------
-    validated.highlightKeywords = extractHighlightKeywords(normalizedJob, normalizedResume);
-
-    console.log("Analysis completed:", {
-      fallbackUsed,
-      fallbackReason,
-      keywordCount: validated.criticalKeywords?.length,
-      highlights: validated.highlightKeywords
-    });
-
-    // -----------------------------------------------------
-    // FINAL RESPONSE
-    // -----------------------------------------------------
-    return res.status(200).json({
-      success: true,
-      analysis: validated,
-      timestamp: new Date().toISOString(),
-      jobMatched: hasResolvedJob,
-      jobDescriptionResolved: normalizedJob,
-      jobDescriptionSource: jobSource,
-      jobDescriptionUrl: jobUrl,
-      jobDescriptionError: jobError,
-      structureSignals: resumeStructure,
-      fallbackUsed,
-      fallbackReason
-    });
-
-  } catch (error) {
-    console.log("Resume analysis error:", error);
-    return res.status(500).json({
-      error: "Failed to analyze resume",
-      message: error.message
-    });
+    console.warn('Job description hydration failed:', error);
+    return {
+      text: '',
+      source: 'url',
+      fetchedFrom: fallbackUrl || primaryUrl,
+      error: error?.message || 'Failed to fetch job description.'
+    };
   }
 }
+
+function isProbablyUrl(value = '') {
+  if (!value) {
+    return false;
+  }
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function resolveLinkedInJobUrls(rawUrl = '') {
+  const trimmed = (rawUrl || '').trim();
+  const defaults = { primaryUrl: trimmed, fallbackUrl: null };
+  if (!trimmed) {
+    return defaults;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch (error) {
+    return defaults;
+  }
+
+  const hostname = parsed.hostname?.toLowerCase() || '';
+  const isLinkedIn = hostname.includes('linkedin.com');
+  if (!isLinkedIn) {
+    return defaults;
+  }
+
+  const extractJobId = () => {
+    if (parsed.searchParams.has('currentJobId')) {
+      return parsed.searchParams.get('currentJobId');
+    }
+    if (parsed.searchParams.has('jobId')) {
+      return parsed.searchParams.get('jobId');
+    }
+    if (parsed.searchParams.has('jobIdList')) {
+      return (parsed.searchParams.get('jobIdList') || '').split(',')[0];
+    }
+    return null;
+  };
+
+  const pathname = parsed.pathname || '';
+  const jobId = extractJobId();
+
+  if (pathname.includes('/jobs/collections/') && jobId) {
+    const canonicalJobUrl = `https://www.linkedin.com/jobs/view/${jobId}`;
+    return { primaryUrl: canonicalJobUrl, fallbackUrl: trimmed };
+  }
+
+  if (pathname.startsWith('/jobs/search/') && jobId) {
+    const canonicalJobUrl = `https://www.linkedin.com/jobs/view/${jobId}`;
+    return { primaryUrl: canonicalJobUrl, fallbackUrl: trimmed };
+  }
+
+  if (pathname.startsWith('/jobs/view/') && !pathname.endsWith('/')) {
+    return { primaryUrl: `${parsed.origin}${pathname}/`, fallbackUrl: trimmed };
+  }
+
+  return defaults;
+}
+
+async function fetchJobPostingSource(jobUrl) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(jobUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Job page responded with status ${response.status}`);
+    }
+
+    return await response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractLinkedInJobDescription(html = '') {
+  if (!html) {
+    return '';
+  }
+
+  const markupMatch = html.match(/<div[^>]+class="show-more-less-html__markup[^>]*>([\s\S]*?)<\/div>/i);
+  if (markupMatch) {
+    const cleaned = cleanLinkedInMarkup(markupMatch[1]);
+    if (cleaned.length > 40) {
+      return cleaned;
+    }
+  }
+
+  const fallbackMarkupPatterns = [
+    /<div[^>]+data-test="job-description-text"[^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+data-test="job-description__text"[^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class="decorated-job-posting__details"[^>]*>([\s\S]*?)<\/div>/i
+  ];
+  for (const pattern of fallbackMarkupPatterns) {
+    const match = html.match(pattern);
+    if (match) {
+      const cleaned = cleanLinkedInMarkup(match[1]);
+      if (cleaned.length > 40) {
+        return cleaned;
+      }
+    }
+  }
+
+  const ldJsonMatches = [...html.matchAll(/<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const match of ldJsonMatches) {
+    const description = extractDescriptionFromJsonString(match[1]);
+    if (description) {
+      return description;
+    }
+  }
+
+  const nextDataMatch = html.match(/<script type="application\/json" id="__NEXT_DATA__">([\s\S]*?)<\/script>/);
+  if (nextDataMatch) {
+    const description = extractDescriptionFromJsonString(nextDataMatch[1]);
+    if (description) {
+      return description;
+    }
+  }
+
+  const decoratedMatches = [...html.matchAll(/<code[^>]+id="decoratedJobPostingModule[^"]*"[^>]*>([\s\S]*?)<\/code>/gi)];
+  for (const match of decoratedMatches) {
+    const decoded = decodeHtmlEntities(match[1]);
+    const description = extractDescriptionFromJsonString(decoded);
+    if (description) {
+      return description;
+    }
+  }
+
+  const inlineJsonMatch = html.match(/"sectionDescription"\s*:\s*\{\s*"text"\s*:\s*"([\s\S]*?)"\s*\}/i);
+  if (inlineJsonMatch) {
+    const text = decodeHtmlEntities(inlineJsonMatch[1]).replace(/\\n/g, ' ').replace(/\\t/g, ' ');
+    const cleaned = stripHtmlTags(text).trim();
+    if (cleaned.length > 80) {
+      return cleaned;
+    }
+  }
+
+  return '';
+}
+
+function cleanLinkedInMarkup(markup = '') {
+  if (!markup) {
+    return '';
+  }
+  const withoutHidden = markup.replace(/<span class="visually-hidden">[\s\S]*?<\/span>/gi, '');
+  return decodeHtmlEntities(stripHtmlTags(withoutHidden)).trim();
+}
+
+function extractDescriptionFromJson(payload, depth = 0) {
+  if (!payload || depth > 6) {
+    return '';
+  }
+
+  if (typeof payload === 'string') {
+    const cleaned = decodeHtmlEntities(stripHtmlTags(payload));
+    if (cleaned.length > 120) {
+      return cleaned;
+    }
+    return '';
+  }
+
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = extractDescriptionFromJson(item, depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+    return '';
+  }
+
+  if (typeof payload === 'object') {
+    if (typeof payload.description === 'string' && payload.description.trim().length > 80) {
+      return decodeHtmlEntities(stripHtmlTags(payload.description));
+    }
+    if (typeof payload.body === 'string' && payload.body.trim().length > 80) {
+      return decodeHtmlEntities(stripHtmlTags(payload.body));
+    }
+    for (const key of Object.keys(payload)) {
+      const found = extractDescriptionFromJson(payload[key], depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return '';
+}
+
+function stripHtmlTags(html = '') {
+  return html.replace(/<[^>]+>/g, ' ');
+}
+
+function decodeHtmlEntities(text = '') {
+  if (!text) {
+    return '';
+  }
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#xA;/gi, '\n')
+    .replace(/&#x0A;/gi, '\n')
+    .replace(/&#10;/gi, '\n')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractDescriptionFromJsonString(raw = '') {
+  if (!raw) {
+    return '';
+  }
+  const parsed = parseJsonSafe(raw);
+  if (!parsed) {
+    return '';
+  }
+  return extractDescriptionFromJson(parsed);
+}
+
+function parseJsonSafe(raw = '') {
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    try {
+      return JSON.parse(raw.replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+    } catch (innerError) {
+      return null;
+    }
+  }
+}
+
+const CORE_RESUME_SECTIONS = ['Summary', 'Experience', 'Skills', 'Education'];
+const SECTION_PATTERNS = [
+  { label: 'Summary', regex: /^(?:professional\s+)?summary\b/i },
+  { label: 'Experience', regex: /^(?:work|professional)?\s*experience\b/i },
+  { label: 'Skills', regex: /^skills\b|^technical skills\b|^core competencies\b/i },
+  { label: 'Education', regex: /^education\b|^academics\b/i },
+  { label: 'Certifications', regex: /^certifications?\b|^licenses?\b/i },
+  { label: 'Projects', regex: /^projects?\b|^case studies\b/i },
+  { label: 'Leadership', regex: /^leadership\b|^management highlights\b/i },
+  { label: 'Awards', regex: /^awards?\b|^recognition\b/i },
+  { label: 'Volunteer', regex: /^volunteer\b|^community\b/i }
+];
+const INLINE_HEADING_SYNONYMS = {
+  Summary: ['SUMMARY', 'SUMMARY STATEMENT', 'PROFESSIONAL SUMMARY', 'EXECUTIVE SUMMARY', 'PROFILE', 'OVERVIEW'],
+  Experience: ['EXPERIENCE', 'WORK EXPERIENCE', 'PROFESSIONAL EXPERIENCE', 'CAREER EXPERIENCE', 'EMPLOYMENT HISTORY'],
+  Skills: ['SKILLS', 'TECHNICAL SKILLS', 'CORE COMPETENCIES', 'AREAS OF EXPERTISE', 'KEY SKILLS', 'SKILLS & TOOLS'],
+  Education: ['EDUCATION', 'ACADEMICS', 'ACADEMIC HISTORY', 'TRAINING & EDUCATION', 'TRAINING AND EDUCATION', 'EDUCATION & CERTIFICATIONS']
+};
+const MONTH_REGEX = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+
+function normalizeResumeContent(text = '') {
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+
+  let normalized = text
+    .replace(/\u00A0/g, ' ')
+    .replace(/\u200B/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\t]+/g, ' ')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
+
+  normalized = normalized.replace(/ {2,}/g, ' ').trim();
+  return normalizeBulletGlyphs(normalized);
+}
+
+function deriveResumeStructureSignals(text = '') {
+  if (!text) {
+    return {
+      headings: [],
+      missingCoreSections: [...CORE_RESUME_SECTIONS],
+      bulletLines: 0,
+      actionBulletLines: 0,
+      timelineEntries: 0,
+      standaloneYears: 0,
+      denseParagraphs: 0
+    };
+  }
+
+  const normalized = normalizeResumeContent(text);
+  const bulletInjectionRegex = createBulletRegex('g');
+  const bulletPrimed = normalized.replace(bulletInjectionRegex, match => `\n${match}`);
+  const structureFriendly = bulletPrimed
+    .replace(/\s{2,}(?=[A-Z0-9(])/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+
+  const lines = structureFriendly.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const headingsSet = new Set();
+  lines.forEach(line => {
+    SECTION_PATTERNS.forEach(pattern => {
+      if (pattern.regex.test(line)) {
+        headingsSet.add(pattern.label);
+      }
+    });
+  });
+
+  if (headingsSet.size < CORE_RESUME_SECTIONS.length) {
+    const uppercaseText = structureFriendly.toUpperCase();
+    Object.entries(INLINE_HEADING_SYNONYMS).forEach(([label, synonyms]) => {
+      if (headingsSet.has(label)) {
+        return;
+      }
+      const found = synonyms.some(keyword => {
+        const pattern = new RegExp(`(?:^|[\n\r\s\-\|:/])${escapeRegex(keyword)}(?:$|[\n\r\s\-\|:/])`, 'i');
+        return pattern.test(uppercaseText);
+      });
+      if (found) {
+        headingsSet.add(label);
+      }
+    });
+  }
+
+  const bulletLinePattern = new RegExp(`^[-–—*${BULLET_GLYPH_SOURCE}]`);
+  const bulletLinesFromStarts = lines.filter(line => bulletLinePattern.test(line)).length;
+  const actionVerbPattern = /^(grew|improved|increased|reduced|led|managed|oversaw|designed|built|launched|developed|implemented|optimized|delivered|drove|owned|created|introduced|executed|achieved|coordinated|partnered|spearheaded|streamlined|directed|orchestrated|transformed|modernized|enhanced|boosted)/i;
+  const actionBulletLinesFromStarts = lines.filter(line => {
+    const sanitized = line.replace(/^[-–—*•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾\d\.\)\s]*/, '');
+    return actionVerbPattern.test(sanitized);
+  }).length;
+
+  const inlineBulletSplitter = createBulletRegex('g');
+  const inlineBulletSegments = structureFriendly.split(inlineBulletSplitter).slice(1).map(segment => segment.trim()).filter(Boolean);
+  const inlineBulletCount = inlineBulletSegments.length;
+  const inlineActionBulletCount = inlineBulletSegments.filter(segment => actionVerbPattern.test(segment)).length;
+
+  const bulletLines = Math.max(bulletLinesFromStarts, inlineBulletCount);
+  const actionBulletLines = Math.max(actionBulletLinesFromStarts, inlineActionBulletCount);
+
+  const monthRangePattern = new RegExp(`\b${MONTH_REGEX}\.?(?:\s+|\s*,\s*)?(?:19|20)?\d{2}\s*(?:-|–|—|to)\s*(?:present|current|${MONTH_REGEX}\.?(?:\s+|\s*,\s*)?(?:19|20)?\d{2})`, 'gi');
+  const yearRangePattern = /\b(?:19|20)\d{2}\s*(?:-|–|—|to)\s*(?:present|current|(?:19|20)\d{2})\b/gi;
+  const timelineEntries = (normalized.match(monthRangePattern) || []).length + (normalized.match(yearRangePattern) || []).length;
+  const standaloneYears = (normalized.match(/\b(?:19|20)\d{2}\b/g) || []).length;
+  const denseParagraphs = lines.filter(line => line.length > 220).length;
+
+  const missingCoreSections = CORE_RESUME_SECTIONS.filter(section => !headingsSet.has(section));
+
+  return {
+    headings: Array.from(headingsSet),
+    missingCoreSections,
+    bulletLines,
+    actionBulletLines,
+    timelineEntries,
+    standaloneYears,
+    denseParagraphs
+  };
+}
+
+function generateStructureInsightCard(structureSignals) {
+  if (!structureSignals) {
+    return null;
+  }
+
+  const detailParts = [];
+  detailParts.push(`${structureSignals.headings?.length || 0} section headings detected`);
+  detailParts.push(`${structureSignals.bulletLines || 0} bullet-style lines`);
+  const timelineCount = structureSignals.timelineEntries || structureSignals.standaloneYears || 0;
+  detailParts.push(`${timelineCount} timeline references`);
+
+  let status = 'good';
+  if ((structureSignals.missingCoreSections?.length || 0) >= 2) {
+    status = 'critical';
+  } else if ((structureSignals.missingCoreSections?.length || 0) === 1) {
+    status = 'warning';
+  }
+
+  const tips = [];
+  if (structureSignals.missingCoreSections?.length) {
+    tips.push(`Add clearly labeled ${structureSignals.missingCoreSections.join(', ')} section${structureSignals.missingCoreSections.length > 1 ? 's' : ''}.`);
+  }
+  if ((structureSignals.timelineEntries || 0) < 2 && (structureSignals.standaloneYears || 0) < 2) {
+    tips.push('Include explicit date ranges (e.g., 2019–2024) for each role.');
+  }
+  if ((structureSignals.bulletLines || 0) < 6 && (structureSignals.denseParagraphs || 0) > 0) {
+    tips.push('Break dense paragraphs into concise bullet points to highlight wins.');
+  }
+  if (!tips.length) {
+    tips.push('Structure looks solid—keep consistent headings, bullets, and timelines.');
+  }
+
+  return {
+    title: 'Structure & Timeline',
+    status,
+    details: detailParts.join(', '),
+    tips
+  };
+}
+
