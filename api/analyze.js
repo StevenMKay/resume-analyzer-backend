@@ -135,10 +135,9 @@ export default async function handler(req, res) {
 
     const { analysis, fallbackUsed, fallbackReason } = await generateAnalysis(prompt, safeResume, safeJob, OPENAI_API_KEY);
 
-    const validated = enforceResumeCompleteness(
-      validateAndFixAnalysis(analysis, safeResume, safeJob),
-      safeResume
-    );
+    const normalized = validateAndFixAnalysis(analysis, safeResume, safeJob);
+    const completenessAdjusted = enforceResumeCompleteness(normalized, safeResume);
+    const validated = applyPositiveSignalBoost(completenessAdjusted, safeResume);
 
     const atsSignals = createAtsSignals(safeResume, safeJob);
     validated.atsSignals = atsSignals;
@@ -401,6 +400,10 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
         cleanedSuggestions = cleanedSuggestions.filter(s => !containsJobSpecificLanguage(s));
       }
 
+      cleanedFeedback = neutralizePrestigeBias(cleanedFeedback);
+      cleanedExplanation = neutralizePrestigeBias(cleanedExplanation);
+      cleanedSuggestions = cleanedSuggestions.map(text => enhanceSuggestionSpecificity(neutralizePrestigeBias(text))).filter(Boolean);
+
       if (!cleanedFeedback) {
         cleanedFeedback = generalFeedbackFallback(cleanedName);
       }
@@ -431,7 +434,7 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
       .map(item => {
         const tips = Array.isArray(item.tips) ? item.tips.filter(tip => typeof tip === 'string' && tip.trim().length) : [];
         let cleanedTips = tips;
-        let cleanedDetails = (item.details || '').trim();
+        let cleanedDetails = neutralizePrestigeBias((item.details || '').trim());
 
         if (!hasJobDescription) {
           cleanedDetails = removeJobSpecificLanguage(cleanedDetails);
@@ -441,6 +444,7 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
         if (!cleanedDetails) {
           cleanedDetails = 'Focus on clarity, measurable impact, and ATS-friendly formatting.';
         }
+        cleanedTips = cleanedTips.map(tip => enhanceSuggestionSpecificity(neutralizePrestigeBias(tip))).filter(Boolean);
         if (!cleanedTips.length) {
           cleanedTips = ['Lead with quantifiable wins and keep formatting simple (no tables or graphics).'];
         }
@@ -545,6 +549,28 @@ function generalFeedbackFallback(categoryName = '') {
     return 'Optimize phrasing for ATS by using standard titles and spelling out acronyms once.';
   }
   return 'Keep the section concise, metric-driven, and easy for recruiters to scan quickly.';
+}
+
+function neutralizePrestigeBias(text = '') {
+  if (!text) {
+    return '';
+  }
+  let cleaned = text;
+  cleaned = cleaned.replace(/lacks? (?:a )?prestig(?:e|ious) (?:degree|education)/gi, 'Lean into measurable achievements, certifications, and leadership scope to prove readiness.');
+  cleaned = cleaned.replace(/no (?:ivy[- ]league|top[- ]tier) degree/gi, 'Highlight continuing education, executive programs, or credentials tied to the role.');
+  return cleaned.trim();
+}
+
+function enhanceSuggestionSpecificity(text = '') {
+  if (!text) {
+    return '';
+  }
+  let updated = text.trim();
+  const analyticsToolPattern = /(add|list|highlight)[^\.]{0,80}(tools|software)[^\.]{0,80}(data|analytics)/i;
+  if (analyticsToolPattern.test(updated)) {
+    updated = `${updated.replace(/\.*$/, '')}. Examples: Tableau, Power BI, SQL, Python, Snowflake, Looker.`;
+  }
+  return updated;
 }
 
 function sanitizeCriticalKeywords(keywords, jobSource, resumeSource) {
@@ -742,6 +768,122 @@ function enforceResumeCompleteness(analysis, resumeText = '') {
   });
 
   return analysis;
+}
+
+function applyPositiveSignalBoost(analysis, resumeText = '') {
+  if (!analysis || typeof analysis !== 'object') {
+    return analysis;
+  }
+
+  const signals = detectPositiveSignals(resumeText);
+  const { boost, highlights } = calculatePositiveBoost(signals);
+  if (!boost) {
+    return analysis;
+  }
+
+  const baseScore = typeof analysis.overallScore === 'number' ? analysis.overallScore : 75;
+  analysis.overallScore = Math.min(100, baseScore + boost);
+
+  if (!Array.isArray(analysis.extraInsights)) {
+    analysis.extraInsights = [];
+  }
+
+  const executiveInsight = buildExecutiveStrengthInsight(signals, boost, highlights);
+  if (executiveInsight) {
+    const existingIndex = analysis.extraInsights.findIndex(item => item && item.title === executiveInsight.title);
+    if (existingIndex >= 0) {
+      analysis.extraInsights[existingIndex] = executiveInsight;
+    } else {
+      analysis.extraInsights.push(executiveInsight);
+    }
+  }
+
+  return analysis;
+}
+
+function detectPositiveSignals(resumeText = '') {
+  const text = typeof resumeText === 'string' ? resumeText : '';
+  const metricsRegex = /\b\$?\d{1,3}(?:[,\.\d]{0,6})?(?:%|\+|x| million|bn|m)?\b/gi;
+  const leadershipRegex = /\b(led|lead|leading|oversaw|managed|supervised|directed|orchestrated|spearheaded)\b/gi;
+  const executiveRegex = /\b(vice president|vp|executive director|chief|c[- ]level|head of|senior director)\b/gi;
+  const innovationRegex = /\b(ai|machine learning|ml|automation|analytics platform|data strategy|digital transformation)\b/gi;
+
+  return {
+    metricsCount: (text.match(metricsRegex) || []).length,
+    leadershipMentions: (text.match(leadershipRegex) || []).length,
+    executiveMentions: (text.match(executiveRegex) || []).length,
+    innovationMentions: (text.match(innovationRegex) || []).length
+  };
+}
+
+function calculatePositiveBoost(signals) {
+  if (!signals) {
+    return { boost: 0, highlights: [] };
+  }
+
+  let boost = 0;
+  const highlights = [];
+
+  if (signals.metricsCount >= 10) {
+    boost += 4;
+    highlights.push('Heavy quantification throughout the resume.');
+  } else if (signals.metricsCount >= 5) {
+    boost += 2;
+    highlights.push('Consistent use of metrics.');
+  }
+
+  if (signals.leadershipMentions >= 6) {
+    boost += 3;
+    highlights.push('Multiple leadership verbs detected.');
+  } else if (signals.leadershipMentions >= 3) {
+    boost += 1;
+    highlights.push('Clear leadership language present.');
+  }
+
+  if (signals.executiveMentions >= 3) {
+    boost += 2;
+    highlights.push('Executive-level titles called out.');
+  } else if (signals.executiveMentions >= 1) {
+    boost += 1;
+    highlights.push('Senior scope highlighted.');
+  }
+
+  if (signals.innovationMentions >= 4) {
+    boost += 2;
+    highlights.push('Innovation/AI initiatives emphasized.');
+  } else if (signals.innovationMentions >= 2) {
+    boost += 1;
+    highlights.push('Digital transformation themes identified.');
+  }
+
+  return {
+    boost: Math.min(10, boost),
+    highlights
+  };
+}
+
+function buildExecutiveStrengthInsight(signals, boost, highlights = []) {
+  if (!boost) {
+    return null;
+  }
+
+  const detailParts = [];
+  if (signals.metricsCount) detailParts.push(`${signals.metricsCount} quantified wins`);
+  if (signals.leadershipMentions) detailParts.push(`${signals.leadershipMentions} leadership cues`);
+  if (signals.innovationMentions) detailParts.push(`${signals.innovationMentions} innovation mentions`);
+
+  const details = detailParts.length
+    ? `Detected ${detailParts.join(', ')}. Score boosted +${boost} to reflect executive impact.`
+    : `Score boosted +${boost} to reflect strong executive signaling.`;
+
+  const tips = highlights.length ? highlights : ['Keep spotlighting measurable outcomes and strategic initiatives.'];
+
+  return {
+    title: 'Executive Strengths',
+    status: 'good',
+    details,
+    tips
+  };
 }
 
 function createStandardPrompt(resumeText) {
