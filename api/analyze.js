@@ -168,6 +168,7 @@ export default async function handler(req, res) {
       analysis: validated,
       timestamp: new Date().toISOString(),
       jobMatched: hasResolvedJob,
+      jobDescriptionResolved: hydratedJobDescription,
       jobDescriptionSource,
       jobDescriptionUrl,
       jobDescriptionError,
@@ -719,12 +720,14 @@ function countBulletSymbols(text = '') {
 
   const lineMatches = normalized.match(lineStartPattern) || [];
   const inlineMatches = normalized.match(bulletCharPattern) || [];
+  const explicitCount = lineMatches.length || inlineMatches.length || 0;
 
-  if (lineMatches.length) {
-    return lineMatches.length;
+  if (explicitCount >= 4) {
+    return explicitCount;
   }
 
-  return inlineMatches.length;
+  const implicitCount = estimateImplicitBulletCount(normalized);
+  return implicitCount || explicitCount;
 }
 
 function normalizeBulletGlyphs(text) {
@@ -736,6 +739,45 @@ function normalizeBulletGlyphs(text) {
     .replace(/â€¢|Ã¢â‚¬Â¢|Â·|·|∙|⋅|●|◦|▪|▫||/g, '•')
     .replace(/â€“|â€”|–|—|−/g, '-')
     .replace(/•\s*(?=[A-Za-z])/g, '• ');
+}
+
+function estimateImplicitBulletCount(text = '') {
+  if (!text) {
+    return 0;
+  }
+
+  const lines = text.split(/(?:\r?\n|\u2028|\u2029)/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) {
+    return 0;
+  }
+
+  const actionVerbPattern = /^(grew|improved|increased|reduced|led|managed|oversaw|designed|built|launched|developed|implemented|optimized|delivered|drove|owned|created|introduced|executed|achieved|coordinated|partnered|spearheaded|streamlined|built|directed|orchestrated|transformed|modernized|enhanced|boosted)/i;
+  let implicitCount = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.length > 220) {
+      continue;
+    }
+
+    const looksLikeBullet =
+      actionVerbPattern.test(line) ||
+      /[0-9%$+]/.test(line) ||
+      line.split(/\s+/).length <= 14;
+
+    if (!looksLikeBullet) {
+      continue;
+    }
+
+    const prevLine = lines[i - 1] || '';
+    const separatedFromParagraph = !prevLine || prevLine.length > 220 || /[:.;!?]$/.test(prevLine);
+
+    if (separatedFromParagraph) {
+      implicitCount += 1;
+    }
+  }
+
+  return implicitCount >= 4 ? implicitCount : 0;
 }
 
 function enforceResumeCompleteness(analysis, resumeText = '') {
@@ -1072,29 +1114,52 @@ function extractLinkedInJobDescription(html = '') {
     }
   }
 
+  const fallbackMarkupPatterns = [
+    /<div[^>]+data-test="job-description-text"[^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+data-test="job-description__text"[^>]*>([\s\S]*?)<\/div>/i,
+    /<div[^>]+class="decorated-job-posting__details"[^>]*>([\s\S]*?)<\/div>/i
+  ];
+  for (const pattern of fallbackMarkupPatterns) {
+    const match = html.match(pattern);
+    if (match) {
+      const cleaned = cleanLinkedInMarkup(match[1]);
+      if (cleaned.length > 40) {
+        return cleaned;
+      }
+    }
+  }
+
   const ldJsonMatches = [...html.matchAll(/<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)];
   for (const match of ldJsonMatches) {
-    try {
-      const data = JSON.parse(match[1]);
-      const description = extractDescriptionFromJson(data);
-      if (description) {
-        return description;
-      }
-    } catch (error) {
-      continue;
+    const description = extractDescriptionFromJsonString(match[1]);
+    if (description) {
+      return description;
     }
   }
 
   const nextDataMatch = html.match(/<script type="application\/json" id="__NEXT_DATA__">([\s\S]*?)<\/script>/);
   if (nextDataMatch) {
-    try {
-      const nextData = JSON.parse(nextDataMatch[1]);
-      const description = extractDescriptionFromJson(nextData);
-      if (description) {
-        return description;
-      }
-    } catch (error) {
-      // ignore
+    const description = extractDescriptionFromJsonString(nextDataMatch[1]);
+    if (description) {
+      return description;
+    }
+  }
+
+  const decoratedMatches = [...html.matchAll(/<code[^>]+id="decoratedJobPostingModule[^"]*"[^>]*>([\s\S]*?)<\/code>/gi)];
+  for (const match of decoratedMatches) {
+    const decoded = decodeHtmlEntities(match[1]);
+    const description = extractDescriptionFromJsonString(decoded);
+    if (description) {
+      return description;
+    }
+  }
+
+  const inlineJsonMatch = html.match(/"sectionDescription"\s*:\s*\{\s*"text"\s*:\s*"([\s\S]*?)"\s*\}/i);
+  if (inlineJsonMatch) {
+    const text = decodeHtmlEntities(inlineJsonMatch[1]).replace(/\\n/g, ' ').replace(/\\t/g, ' ');
+    const cleaned = stripHtmlTags(text).trim();
+    if (cleaned.length > 80) {
+      return cleaned;
     }
   }
 
@@ -1170,5 +1235,31 @@ function decodeHtmlEntities(text = '') {
     .replace(/&gt;/gi, '>')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function extractDescriptionFromJsonString(raw = '') {
+  if (!raw) {
+    return '';
+  }
+  const parsed = parseJsonSafe(raw);
+  if (!parsed) {
+    return '';
+  }
+  return extractDescriptionFromJson(parsed);
+}
+
+function parseJsonSafe(raw = '') {
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    try {
+      return JSON.parse(raw.replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+    } catch (innerError) {
+      return null;
+    }
+  }
 }
 
