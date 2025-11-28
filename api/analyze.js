@@ -27,6 +27,17 @@ const CRITICAL_SHORT_TOKENS = new Set(['ai','ml','hr','ui','ux','qa','sql','sap'
 const BULLET_GLYPH_SOURCE = '•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾';
 const createBulletRegex = (flags = 'g') => new RegExp(`[${BULLET_GLYPH_SOURCE}]`, flags);
 
+// -----------------------------------------------------------
+// STAR story example library for fallback generation
+// -----------------------------------------------------------
+const STAR_TEMPLATE_LIBRARY = [
+  "Led a multi-region CRM migration (Situation) by mapping 40+ workflows (Task), partnering with sales ops to retrain 300 reps (Action), and lifted pipeline visibility by 22% (Result).",
+  "Inherited a stalled product launch (Situation), aligned design/engineering on a 60-day go-live plan (Task), ran twice-weekly risk reviews (Action), and shipped on schedule with 1.5x adoption (Result).",
+  "Faced rising support backlogs (Situation), analyzed ticket data to find automation gaps (Task), implemented triage bots and refreshed macros (Action), cutting response time 35% (Result).",
+  "Was asked to expand a healthcare pilot nationally (Situation), built a phased rollout and compliance checklist (Task), coordinated 12 market leads (Action), delivering launch six weeks early (Result).",
+  "Noticed onboarding churn at 18% (Situation), built a cross-functional tiger team (Task), redesigned training journeys (Action), and reduced churn to 8% in two quarters (Result)."
+];
+
 const CRITICAL_KEYWORD_LIBRARY = [
   { phrase: 'Program management', hints: ['program manager', 'program management', 'manage programs'], patterns: [/management of programs?/i] },
   { phrase: 'Project management', hints: ['project management', 'project manager'], patterns: [/management of projects?/i] },
@@ -204,6 +215,8 @@ export default async function handler(req, res) {
         validated.extraInsights.push(structureInsightCard);
       }
     }
+
+    ensureCompanyInsights(validated, normalizedResume, normalizedJobDescription);
 
     validated.storyBuilder = createStoryBuilderPayload(validated, normalizedResume, normalizedJobDescription);
 
@@ -645,8 +658,10 @@ function removeJobSpecificLanguage(text = '') {
     const leadershipStories = deriveLeadershipStories(resumeText, analysis);
     const weaknessMitigation = deriveWeaknessMitigation(analysis);
 
+    const defaultStarStories = starStories.length ? starStories : STAR_TEMPLATE_LIBRARY.slice(0, 3);
+
     return {
-      starStories: starStories.length ? starStories : ["Pick one role, outline the challenge, then quantify your result."],
+      starStories: defaultStarStories,
       tellMeIntro: deriveTellMeIntro(analysis, resumeText, jobDescription),
       tailoredStrengths: strengths.length ? strengths : ["Program leadership", "Stakeholder alignment", "Metric-driven decisions"],
       leadershipStories: leadershipStories.length ? leadershipStories : ["Explain how you aligned cross-functional partners to deliver a measurable win."],
@@ -751,6 +766,87 @@ function removeJobSpecificLanguage(text = '') {
     }
     const properMatch = jobDescription.match(/\b([A-Z][A-Za-z0-9&-]{2,})\b/);
     return properMatch ? properMatch[1] : "your team";
+  }
+
+  const INDUSTRY_PATTERNS = [
+    { regex: /healthcare|patient|clinical|hospital|provider/i, label: 'healthcare transformation' },
+    { regex: /fintech|payments?|banking|credit|loan|financial/i, label: 'financial services modernization' },
+    { regex: /supply chain|logistics|warehouse|fulfillment/i, label: 'supply chain optimization' },
+    { regex: /saas|cloud|platform|api|devops|software/i, label: 'cloud/SaaS platform scale' },
+    { regex: /manufacturing|factory|plant|production/i, label: 'advanced manufacturing automation' },
+    { regex: /retail|ecommerce|merchandising/i, label: 'digital retail experience' },
+    { regex: /energy|utilities|sustainability|carbon/i, label: 'energy & sustainability initiatives' }
+  ];
+
+  function ensureCompanyInsights(analysis, resumeText = "", jobDescription = "") {
+    if (!analysis || typeof analysis !== 'object') {
+      return analysis;
+    }
+
+    if (!Array.isArray(analysis.companyInsights)) {
+      analysis.companyInsights = [];
+    }
+
+    analysis.companyInsights = analysis.companyInsights
+      .map(entry => normalizeCompanyInsight(entry))
+      .filter(Boolean)
+      .slice(0, 3);
+
+    if (analysis.companyInsights.length === 0) {
+      const fallbackInsight = buildCompanyInsightFallback(analysis, resumeText, jobDescription);
+      if (fallbackInsight) {
+        analysis.companyInsights.push(fallbackInsight);
+      }
+    }
+
+    return analysis;
+  }
+
+  function normalizeCompanyInsight(entry) {
+    if (!entry) {
+      return null;
+    }
+    if (typeof entry === 'string') {
+      return {
+        source: 'resume',
+        insight: entry.trim(),
+        action: '',
+        link: ''
+      };
+    }
+
+    if (typeof entry !== 'object') {
+      return null;
+    }
+
+    const insight = (entry.insight || entry.summary || entry.details || '').trim();
+    const action = (entry.action || entry.recommendation || '').trim();
+    const link = (entry.link || entry.url || '').trim();
+    const source = (entry.source || 'resume').trim();
+
+    if (!insight && !action) {
+      return null;
+    }
+
+    return { source, insight, action, link };
+  }
+
+  function buildCompanyInsightFallback(analysis, resumeText = "", jobDescription = "") {
+    const company = extractCompanyFromJobDescription(jobDescription);
+    const industry = inferIndustryFocus(jobDescription, resumeText);
+    const candidateFocus = (analysis?.criticalKeywords || []).slice(0, 2).join(', ') || 'program leadership & metrics';
+    const source = jobDescription ? 'job description + resume' : 'resume';
+
+    const insight = `${company} is prioritizing ${industry}.`;
+    const action = `Emphasize ${candidateFocus} when outlining how you'll accelerate ${industry} roadmaps.`;
+
+    return { source, insight, action, link: '' };
+  }
+
+  function inferIndustryFocus(jobDescription = "", resumeText = "") {
+    const haystack = `${jobDescription}\n${resumeText}`;
+    const match = INDUSTRY_PATTERNS.find(pattern => pattern.regex.test(haystack));
+    return match ? match.label : 'customer experience & operational excellence';
   }
 
 function generalSuggestionFallback(categoryName = '') {
@@ -1193,14 +1289,14 @@ function buildExecutiveStrengthInsight(signals, boost, highlights = []) {
 }
 
 function createStandardPrompt(resumeText) {
-  return `Analyze this resume and provide feedback in JSON format. Deliver actionable insights about strengths, risks, missing metrics, recruiter perception, and interview prep. Respond with JSON only.
+  return `Analyze this resume and provide feedback in JSON format. Deliver actionable insights about strengths, risks, missing metrics, recruiter perception, company-specific positioning, and interview prep. When a recognizable employer is mentioned, incorporate publicly available context (industry focus, recent initiatives, customer profile) to strengthen company insights. Respond with JSON only.
 
 Resume Text:
 """
 ${resumeText}
 """
 
-Return JSON with keys: overallScore (0-100), categories (array of name, status, score, feedback, suggestions[]), companyInsights (array with 0-2 concise insights that highlight how the candidate shows up to employers), extraInsights (array), criticalKeywords (array of 15 phrases), storyBuilder (object), and include specific ATS-related tips.
+Return JSON with keys: overallScore (0-100), categories (array of name, status, score, feedback, suggestions[]), companyInsights (array with 1-3 concise insights that tie the candidate to the target company and reference publicly known facts), extraInsights (array), criticalKeywords (array of 15 phrases), storyBuilder (object), and include specific ATS-related tips.
 
 storyBuilder must contain:
 - starStories: array (max 4) of short STAR-format strings
@@ -1214,7 +1310,7 @@ storyBuilder must contain:
 function createJobMatchingPrompt(resumeText, jobDescription) {
   return `Analyze this resume AGAINST the provided job description. Return JSON only with the same schema as before (overallScore, categories, companyInsights, extraInsights, criticalKeywords, storyBuilder). Highlight keyword gaps, measurable wins, ATS alignment, and interview-ready talking points.
 
-CompanyInsights must include 1-3 bullet-style entries that tie the candidate's experience directly to the job/company details when a description is provided. The storyBuilder object must follow the exact structure defined earlier (starStories, tellMeIntro, tailoredStrengths, leadershipStories, weaknessMitigation, elevatorPitch).
+CompanyInsights must include 1-3 bullet-style entries that cite verifiable, public information about the hiring company (mission, product lines, recent initiatives, customer focus) AND explain exactly how the candidate can support those priorities. Note the information source (resume, job description, or public knowledge) in each entry. The storyBuilder object must follow the exact structure defined earlier (starStories, tellMeIntro, tailoredStrengths, leadershipStories, weaknessMitigation, elevatorPitch).
 
 Resume Text:
 """
