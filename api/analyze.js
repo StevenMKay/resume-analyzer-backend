@@ -1,5 +1,3 @@
-
-
 // Advanced resume analyzer backend with ATS diagnostics and keyword enrichment
 const ALLOWED_ORIGINS = new Set([
   'https://www.careersolutionsfortoday.com',
@@ -207,6 +205,8 @@ export default async function handler(req, res) {
       }
     }
 
+    validated.storyBuilder = createStoryBuilderPayload(validated, normalizedResume, normalizedJobDescription);
+
     res.status(200).json({
       success: true,
       analysis: validated,
@@ -385,13 +385,16 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
     }
   ];
 
-  return {
+  const fallbackAnalysis = {
     overallScore,
     categories,
     companyInsights: [],
     extraInsights,
     criticalKeywords: generateCriticalKeywords(jobSource, resumeSource).slice(0, 15)
   };
+
+  fallbackAnalysis.storyBuilder = buildStoryBuilderFallback(fallbackAnalysis, resumeText, jobDescription);
+  return fallbackAnalysis;
 }
 
 function makeFallbackCategory(name, status, score, feedback, suggestions) {
@@ -526,6 +529,7 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
   }
 
   analysis.criticalKeywords = sanitizeCriticalKeywords(analysis.criticalKeywords, jobDescription, resumeText);
+  analysis.storyBuilder = createStoryBuilderPayload(analysis, resumeText, jobDescription);
 
   if (fixes.length) {
     console.log('Analysis validation fixes applied:', fixes);
@@ -578,6 +582,176 @@ function removeJobSpecificLanguage(text = '') {
   });
   return cleaned.trim();
 }
+
+  // ===============================================================
+  //  INTERVIEW STORY BUILDER — AI + fallback support
+  // ===============================================================
+  function createStoryBuilderPayload(analysis, resumeText, jobDescription) {
+    const fallback = buildStoryBuilderFallback(analysis, resumeText, jobDescription);
+    return sanitizeStoryBuilder(analysis?.storyBuilder, fallback);
+  }
+
+  function sanitizeStoryBuilder(raw, fallback) {
+    const base = fallback || buildStoryBuilderFallback({}, "", "");
+    if (!raw || typeof raw !== "object") {
+      return base;
+    }
+
+    const normalizeStrings = (entries, limit) => {
+      if (!Array.isArray(entries)) return [];
+      return entries
+        .map(entry => {
+          if (typeof entry === "string") return entry.trim();
+          if (entry && typeof entry === "object") {
+            const parts = [entry.title, entry.story, entry.summary, entry.scenario, entry.situation, entry.action, entry.result]
+              .map(part => (typeof part === "string" ? part.trim() : ""))
+              .filter(Boolean);
+            return parts.join(" — ").trim();
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .slice(0, limit);
+    };
+
+    const starStories = normalizeStrings(raw.starStories, 4);
+    const strengths = normalizeStrings(raw.tailoredStrengths, 10);
+    const leadership = normalizeStrings(raw.leadershipStories, 3);
+    const normalizedTellMe = typeof raw.tellMeIntro === "string" ? raw.tellMeIntro.trim() : "";
+    const normalizedPitch = typeof raw.elevatorPitch === "string" ? raw.elevatorPitch.trim() : "";
+
+    const weaknessObj = raw.weaknessMitigation && typeof raw.weaknessMitigation === "object"
+      ? {
+          weakness: typeof raw.weaknessMitigation.weakness === "string" ? raw.weaknessMitigation.weakness.trim() : "",
+          mitigation: typeof raw.weaknessMitigation.mitigation === "string" ? raw.weaknessMitigation.mitigation.trim() : ""
+        }
+      : { weakness: "", mitigation: "" };
+
+    return {
+      starStories: starStories.length ? starStories : base.starStories,
+      tellMeIntro: normalizedTellMe || base.tellMeIntro,
+      tailoredStrengths: strengths.length ? strengths : base.tailoredStrengths,
+      leadershipStories: leadership.length ? leadership : base.leadershipStories,
+      weaknessMitigation: (weaknessObj.weakness || weaknessObj.mitigation)
+        ? weaknessObj
+        : base.weaknessMitigation,
+      elevatorPitch: normalizedPitch || base.elevatorPitch
+    };
+  }
+
+  function buildStoryBuilderFallback(analysis = {}, resumeText = "", jobDescription = "") {
+    const starStories = deriveStarStories(analysis);
+    const strengths = deriveStrengths(analysis);
+    const leadershipStories = deriveLeadershipStories(resumeText, analysis);
+    const weaknessMitigation = deriveWeaknessMitigation(analysis);
+
+    return {
+      starStories: starStories.length ? starStories : ["Pick one role, outline the challenge, then quantify your result."],
+      tellMeIntro: deriveTellMeIntro(analysis, resumeText, jobDescription),
+      tailoredStrengths: strengths.length ? strengths : ["Program leadership", "Stakeholder alignment", "Metric-driven decisions"],
+      leadershipStories: leadershipStories.length ? leadershipStories : ["Explain how you aligned cross-functional partners to deliver a measurable win."],
+      weaknessMitigation,
+      elevatorPitch: deriveElevatorPitch(analysis, strengths, jobDescription)
+    };
+  }
+
+  function deriveStarStories(analysis) {
+    const categories = Array.isArray(analysis?.categories) ? analysis.categories.slice(0, 4) : [];
+    return categories
+      .map(category => {
+        if (!category) return "";
+        const name = (category.name || "Impact Story").trim();
+        const situation = (category.feedback || "Outline the situation and scope.").trim();
+        const suggestionA = Array.isArray(category.suggestions) && category.suggestions[0]
+          ? category.suggestions[0]
+          : "Highlight the action you drove.";
+        const suggestionR = Array.isArray(category.suggestions) && category.suggestions[1]
+          ? category.suggestions[1]
+          : "Close with quantified outcomes.";
+        return `${name}: Situation — ${situation}; Action — ${suggestionA}; Result — ${suggestionR}`;
+      })
+      .filter(Boolean);
+  }
+
+  function deriveTellMeIntro(analysis, resumeText = "", jobDescription = "") {
+    const keywords = Array.isArray(analysis?.criticalKeywords) ? analysis.criticalKeywords.slice(0, 2) : [];
+    const roleMatch = resumeText.match(/\b(Director|Manager|Lead|Leader|Analyst|Consultant|Engineer|Specialist)\b/i);
+    const role = roleMatch ? roleMatch[0].toLowerCase() : "program leader";
+    const highlight = analysis?.extraInsights?.find(ins => ins?.status === "good")?.details
+      || (jobDescription ? jobDescription.slice(0, 140) : "Blend strategy and execution to deliver measurable improvements.");
+    const metrics = Number(analysis?.atsSignals?.metricDensity) || 0;
+    const metricsPhrase = metrics >= 4 ? ` with ${metrics} measurable wins referenced` : "";
+    const keywordPhrase = keywords.length ? keywords.join(" + ") : "cross-functional excellence";
+    return `I'm a ${role} who specializes in ${keywordPhrase}${metricsPhrase}. ${highlight}`;
+  }
+
+  function deriveStrengths(analysis) {
+    const pool = new Set();
+    (analysis?.criticalKeywords || []).forEach(keyword => {
+      if (keyword) pool.add(keyword);
+    });
+    (analysis?.highlightKeywords || []).forEach(keyword => {
+      if (keyword) pool.add(keyword);
+    });
+    (analysis?.extraInsights || []).forEach(insight => {
+      if (insight?.title) pool.add(insight.title);
+    });
+    (analysis?.categories || []).forEach(category => {
+      if (category?.status === "good" && category?.name) {
+        pool.add(`${category.name} Strength`);
+      }
+    });
+    return Array.from(pool).filter(Boolean).slice(0, 10);
+  }
+
+  function deriveLeadershipStories(resumeText = "", analysis) {
+    const leadershipRegex = /\b(led|managed|mentored|directed|oversaw|spearheaded|coached|orchestrated|partnered)\b/i;
+    const lines = (resumeText || "")
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => leadershipRegex.test(line) && line.length > 20 && line.length < 220);
+
+    if (lines.length) {
+      return lines.slice(0, 3);
+    }
+
+    return (analysis?.categories || [])
+      .filter(category => /lead|stakeholder|team/i.test(category?.name || "") && category?.feedback)
+      .map(category => category.feedback)
+      .slice(0, 2);
+  }
+
+  function deriveWeaknessMitigation(analysis) {
+    const warning = (analysis?.atsWarnings && analysis.atsWarnings[0])
+      || (analysis?.extraInsights || []).find(ins => ins && (ins.status === "warning" || ins.status === "critical"))?.details
+      || "Interviewers may test how you scale your impact.";
+
+    const mitigation = (analysis?.extraInsights || [])
+      .find(ins => ins && (ins.status === "warning" || ins.status === "critical") && Array.isArray(ins.tips) && ins.tips.length > 0)?.tips?.[0]
+      || "Explain the playbook you're running to close the gap and the metric you plan to improve next.";
+
+    return { weakness: warning, mitigation };
+  }
+
+  function deriveElevatorPitch(analysis, strengths = [], jobDescription = "") {
+    const focusArea = strengths.length ? strengths.slice(0, 3).join(", ") : "program leadership, analytics, and stakeholder alignment";
+    const company = extractCompanyFromJobDescription(jobDescription);
+    const highlight = analysis?.extraInsights?.[0]?.details || "deliver measurable improvements end-to-end.";
+    const score = Number(analysis?.overallScore) || 75;
+    return `I blend ${focusArea} to keep initiatives on track. This resume currently scores ${score}/100, and I'm targeting ${company} so we can ${highlight}`;
+  }
+
+  function extractCompanyFromJobDescription(jobDescription = "") {
+    if (!jobDescription) {
+      return "your team";
+    }
+    const atMatch = jobDescription.match(/at\s+([A-Z][\w&-]+)/i);
+    if (atMatch) {
+      return atMatch[1];
+    }
+    const properMatch = jobDescription.match(/\b([A-Z][A-Za-z0-9&-]{2,})\b/);
+    return properMatch ? properMatch[1] : "your team";
+  }
 
 function generalSuggestionFallback(categoryName = '') {
   const key = categoryName.toLowerCase();
@@ -1019,20 +1193,28 @@ function buildExecutiveStrengthInsight(signals, boost, highlights = []) {
 }
 
 function createStandardPrompt(resumeText) {
-  return `Analyze this resume and provide feedback in JSON format. Deliver actionable insights about strengths, risks, missing metrics, and recruiter perception. Respond with JSON only.
+  return `Analyze this resume and provide feedback in JSON format. Deliver actionable insights about strengths, risks, missing metrics, recruiter perception, and interview prep. Respond with JSON only.
 
 Resume Text:
 """
 ${resumeText}
 """
 
-Return JSON with keys: overallScore (0-100), categories (array of name, status, score, feedback, suggestions[]), companyInsights (array with 0-2 concise insights that highlight how the candidate shows up to employers), extraInsights (array), criticalKeywords (array of 15 phrases), and include specific ATS-related tips. Cite concrete examples or metrics whenever they appear.`;
+Return JSON with keys: overallScore (0-100), categories (array of name, status, score, feedback, suggestions[]), companyInsights (array with 0-2 concise insights that highlight how the candidate shows up to employers), extraInsights (array), criticalKeywords (array of 15 phrases), storyBuilder (object), and include specific ATS-related tips.
+
+storyBuilder must contain:
+- starStories: array (max 4) of short STAR-format strings
+- tellMeIntro: 1-2 sentence "tell me about yourself" intro
+- tailoredStrengths: array (max 10) of succinct strengths or differentiators
+- leadershipStories: array (max 3) of leadership-focused anecdotes
+- weaknessMitigation: object with weakness and mitigation strings
+- elevatorPitch: 60-90 second pitch string referencing measurable impact.`;
 }
 
 function createJobMatchingPrompt(resumeText, jobDescription) {
-  return `Analyze this resume AGAINST the provided job description. Return JSON only with the same schema as before (overallScore, categories, companyInsights, extraInsights, criticalKeywords). Highlight keyword gaps, measurable wins, and ATS alignment.
+  return `Analyze this resume AGAINST the provided job description. Return JSON only with the same schema as before (overallScore, categories, companyInsights, extraInsights, criticalKeywords, storyBuilder). Highlight keyword gaps, measurable wins, ATS alignment, and interview-ready talking points.
 
-CompanyInsights must include 1-3 bullet-style entries that tie the candidate's experience directly to the job/company details when a description is provided.
+CompanyInsights must include 1-3 bullet-style entries that tie the candidate's experience directly to the job/company details when a description is provided. The storyBuilder object must follow the exact structure defined earlier (starStories, tellMeIntro, tailoredStrengths, leadershipStories, weaknessMitigation, elevatorPitch).
 
 Resume Text:
 """
