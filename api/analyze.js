@@ -1289,28 +1289,44 @@ function buildExecutiveStrengthInsight(signals, boost, highlights = []) {
 }
 
 function createStandardPrompt(resumeText) {
-  return `Analyze this resume and provide feedback in JSON format. Deliver actionable insights about strengths, risks, missing metrics, recruiter perception, company-specific positioning, and interview prep. When a recognizable employer is mentioned, incorporate publicly available context (industry focus, recent initiatives, customer profile) to strengthen company insights. Respond with JSON only.
+  return `You are an executive resume analyst creating JSON output only. Provide recruiter-ready guidance, quantified examples, and interview prep material that ties directly to the resume. When well-known employers or industries are referenced, add context pulled from publicly available knowledge (no hallucinated facts). If information is missing, infer sensible, clearly labeled best guesses using the resume cues.
 
 Resume Text:
 """
 ${resumeText}
 """
 
-Return JSON with keys: overallScore (0-100), categories (array of name, status, score, feedback, suggestions[]), companyInsights (array with 1-3 concise insights that tie the candidate to the target company and reference publicly known facts), extraInsights (array), criticalKeywords (array of 15 phrases), storyBuilder (object), and include specific ATS-related tips.
+Return JSON with these keys:
+- overallScore: number 0-100
+- categories: array of objects { name, status, score, feedback, suggestions[] } summarizing summary/experience/skills/etc
+- companyInsights: 1-3 entries that combine public intel about the company(s) cited in the resume with specific actions the candidate can take; each entry must include fields { source: "resume"|"jobDescription"|"public knowledge", insight, action, link }
+- extraInsights: array of themed cards { title, status, details, tips[] }
+- criticalKeywords: 15 phrases that show the most ATS-relevant language to mirror
+- storyBuilder: object used for interview practice
 
-storyBuilder must contain:
-- starStories: array (max 4) of short STAR-format strings
-- tellMeIntro: 1-2 sentence "tell me about yourself" intro
-- tailoredStrengths: array (max 10) of succinct strengths or differentiators
-- leadershipStories: array (max 3) of leadership-focused anecdotes
-- weaknessMitigation: object with weakness and mitigation strings
-- elevatorPitch: 60-90 second pitch string referencing measurable impact.`;
+storyBuilder requirements:
+1. starStories: always return four entries. Each entry must read like "Question: <behavioral prompt> || Answer: <STAR response with Situation -> Task -> Action -> Result and metrics>".
+2. tellMeIntro: 1-2 sentences summarizing persona + impact + domains.
+3. tailoredStrengths: up to 10 bullet phrases, each rooted in resume evidence.
+4. leadershipStories: up to 3 anecdotes highlighting teams led, scope, and tangible results.
+5. weaknessMitigation: object { weakness, mitigation } offering a candid gap plus concrete remediation plan.
+6. elevatorPitch: 60-90 second script referencing hard numbers and future value.
+
+Make every section specific to the resume text, with no placeholder language. JSON only—no markdown, no commentary.`;
 }
 
 function createJobMatchingPrompt(resumeText, jobDescription) {
-  return `Analyze this resume AGAINST the provided job description. Return JSON only with the same schema as before (overallScore, categories, companyInsights, extraInsights, criticalKeywords, storyBuilder). Highlight keyword gaps, measurable wins, ATS alignment, and interview-ready talking points.
+  return `You are analyzing a resume against the provided job description. Produce JSON only using the same schema (overallScore, categories, companyInsights, extraInsights, criticalKeywords, storyBuilder). Explicitly align every section to the role requirements, highlighting keyword gaps, ATS considerations, and interviewer talking points.
 
-CompanyInsights must include 1-3 bullet-style entries that cite verifiable, public information about the hiring company (mission, product lines, recent initiatives, customer focus) AND explain exactly how the candidate can support those priorities. Note the information source (resume, job description, or public knowledge) in each entry. The storyBuilder object must follow the exact structure defined earlier (starStories, tellMeIntro, tailoredStrengths, leadershipStories, weaknessMitigation, elevatorPitch).
+CompanyInsights instructions:
+- Provide 2-3 entries.
+- Each entry must cite verifiable public intel about the hiring company or industry (mission, product launches, risk posture, customer profile, recent news) AND tie it to how this candidate can help.
+- Include an action step and, when possible, a reputable link.
+- Maintain { source, insight, action, link } structure.
+
+StoryBuilder instructions:
+- starStories must contain four question/answer pairs in the format "Question: ... || Answer: ... (Situation -> Task -> Action -> Result with metrics)".
+- TellMeIntro, tailoredStrengths, leadershipStories, weaknessMitigation, and elevatorPitch follow the same requirements as in the standard prompt but should reference both the resume proof points and the job description priorities.
 
 Resume Text:
 """
