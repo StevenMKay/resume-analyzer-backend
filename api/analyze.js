@@ -627,7 +627,7 @@ function removeJobSpecificLanguage(text = '') {
         .slice(0, limit);
     };
 
-    const starStories = normalizeStrings(raw.starStories, 4);
+    const starStories = normalizeStrings(raw.starStories, 4).filter(isMeaningfulStarStory);
     const strengths = normalizeStrings(raw.tailoredStrengths, 10);
     const leadership = normalizeStrings(raw.leadershipStories, 3);
     const normalizedTellMe = typeof raw.tellMeIntro === "string" ? raw.tellMeIntro.trim() : "";
@@ -650,6 +650,20 @@ function removeJobSpecificLanguage(text = '') {
         : base.weaknessMitigation,
       elevatorPitch: normalizedPitch || base.elevatorPitch
     };
+  }
+
+  function isMeaningfulStarStory(entry = "") {
+    if (!entry || typeof entry !== "string") {
+      return false;
+    }
+    const text = entry.toLowerCase();
+    const hasQuestionLabel = /question\s*[:|-]/i.test(entry) || /tell me about/i.test(entry);
+    if (!hasQuestionLabel) {
+      return false;
+    }
+    const contactSignal = /(contact info|contact information|email address|phone number|linkedin profile|resume header)/i;
+    const formattingSignal = /(resume (?:format|layout|template)|skills section|bullet length|header contains)/i;
+    return !contactSignal.test(text) && !formattingSignal.test(text);
   }
 
   function buildStoryBuilderFallback(analysis = {}, resumeText = "", jobDescription = "") {
