@@ -253,7 +253,7 @@ function applyCors(req, res) {
 
 async function generateAnalysis(prompt, resumeText, jobDescription, apiKey) {
   const requestBody = {
-    model: 'gpt-4o-mini',
+    model: 'gpt-4.1-mini',
     messages: [
       {
         role: 'system',
@@ -265,7 +265,7 @@ async function generateAnalysis(prompt, resumeText, jobDescription, apiKey) {
       }
     ],
     temperature: 0.2,
-    max_tokens: 3000,
+    max_tokens: 4000,
     response_format: { type: 'json_object' }
   };
 
@@ -1305,7 +1305,8 @@ Return JSON with these keys:
 - storyBuilder: object used for interview practice
 
 storyBuilder requirements:
-1. starStories: always return four entries based strictly on work experience or measurable accomplishments from the resume (never contact info, formatting tips, or generic skills). Each question must feel like an interviewer prompt tailored to the candidate’s domain (process improvement, lending strategy, automation, training, customer impact, risk, change management, etc.). Every entry must include: (a) a unique behavioral question that references the resume role or business context; (b) Situation with two concise sentences describing the exact scenario (team size, business unit, KPIs, client group); (c) Task describing what the candidate owned; (d) Action listing two to three key steps with action verbs; (e) Result with quantified or clearly stated impact tied to real metrics; (f) Sample Answer containing a four-to-five sentence first-person STAR response. Use the exact format "Question: ... || Situation: ... || Task: ... || Action: ... || Result: ... || Sample Answer: ..." and vary question stems so none of the four are identical.
+- Before generating any storyBuilder content, mine the resume for actual employers, job titles, business units, systems, KPIs, budgets, customer segments, and quantified impacts. Use those concrete facts verbatim; never talk about contact information, resume formatting, or generic skills in this section.
+1. starStories: always return four entries based strictly on resume achievements that map to real responsibilities (process improvement, lending strategy, automation, training, customer impact, risk, change management, etc.). Each question must read like an interviewer prompt for the candidate’s target role and cite the relevant domain (e.g., "How did you automate credit decisioning for the Small Business Lending team at XYZ?"). Every entry must include: (a) a unique behavioral question tied to a resume role or program; (b) Situation with two concise sentences naming the employer/team and business context with KPIs or constraints; (c) Task describing the ownership statement in first person; (d) Action listing two to three bold steps with action verbs and tools used; (e) Result with quantified or clearly stated impact tied to resume metrics; (f) Sample Answer containing a four-to-five sentence first-person STAR response that could be spoken verbatim. Use the exact format "Question: ... || Situation: ... || Task: ... || Action: ... || Result: ... || Sample Answer: ..." and vary question stems so none of the four are identical.
 2. tellMeIntro: 1-2 sentences summarizing persona + impact + domains.
 3. tailoredStrengths: up to 10 bullet phrases, each rooted in resume evidence.
 4. leadershipStories: up to 3 anecdotes highlighting teams led, scope, and tangible results.
@@ -1325,7 +1326,8 @@ CompanyInsights instructions:
 - Maintain { source, insight, action, link } structure.
 
 StoryBuilder instructions:
-- starStories must contain four question/answer entries derived from resume achievements that map to the job requirements. For each entry craft a unique interviewer-style question that explicitly references a responsibility or KPI from the job description (for example, “How did you lead a separation services rollout?”). Use the exact format "Question: ... || Situation: ... || Task: ... || Action: ... || Result: ... || Sample Answer: ...". Fill Situation/Task/Action/Result with concrete resume evidence (titles, teams, systems, budgets, tools, KPIs) and include numbers wherever possible. Ensure the Sample Answer is a cohesive four-to-five sentence first-person STAR narrative that can be spoken verbatim. Prioritize scenarios that mirror the job description themes, do not fabricate facts, and never generate STAR stories about contact info, skills lists, or formatting feedback.
+- First, identify the resume achievements, employers, teams, and metrics that line up with the job description’s responsibilities, KPIs, tool stacks, and stakeholder groups. Use those exact data points in every storyBuilder field; no contact-info or formatting talk.
+- starStories must contain four question/answer entries derived from resume achievements that map directly to the job requirements. For each entry craft a unique interviewer-style question that explicitly references a responsibility, KPI, or deliverable from the job description (for example, “How did you lead the separation services rollout for the Global HR Ops team?”). Use the exact format "Question: ... || Situation: ... || Task: ... || Action: ... || Result: ... || Sample Answer: ...". Fill Situation/Task/Action/Result with concrete resume evidence (titles, teams, systems, budgets, tools, KPIs) and mention the job requirement you are addressing. Ensure the Sample Answer is a cohesive four-to-five sentence first-person STAR narrative that can be spoken verbatim. Prioritize scenarios that mirror the job description themes, do not fabricate facts, and never generate STAR stories about contact info, skills lists, or formatting feedback.
 - TellMeIntro, tailoredStrengths, leadershipStories, weaknessMitigation, and elevatorPitch follow the same requirements as in the standard prompt but should reference both the resume proof points and the job description priorities.
 
 Resume Text:
