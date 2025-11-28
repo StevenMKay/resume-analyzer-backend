@@ -1357,8 +1357,6 @@ function enforceResumeCompleteness(analysis, resumeText = '', structureSignals =
     return analysis;
   }
 
-  analysis.overallScore = Math.max(25, analysis.overallScore - penalty);
-
   if (!Array.isArray(analysis.extraInsights)) {
     analysis.extraInsights = [];
   }
