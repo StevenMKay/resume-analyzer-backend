@@ -8,6 +8,7 @@ from urllib.parse import parse_qs
 from PyPDF2 import PdfReader
 from docx import Document
 
+
 # Initialize OpenAI
 openai.api_key = os.environ.get('OPENAI_API_KEY')
 
