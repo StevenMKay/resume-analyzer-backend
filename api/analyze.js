@@ -700,10 +700,12 @@ function removeJobSpecificLanguage(text = '') {
       return [];
     }
     const jobThemes = deriveJobThemes(jobDescription);
+    const targetCompany = extractCompanyFromJobDescription(jobDescription);
     return achievements
       .map((achievement, index) => createStarStoryFromAchievement(
         achievement,
-        jobThemes[index % Math.max(1, jobThemes.length)] || null
+        jobThemes[index % Math.max(1, jobThemes.length)] || null,
+        targetCompany
       ))
       .filter(Boolean)
       .slice(0, 4);
@@ -783,7 +785,7 @@ function removeJobSpecificLanguage(text = '') {
     return /(vice president|director|manager|lead|leader|consultant|analyst|engineer|specialist|head|principal)/i.test(line);
   }
 
-  function createStarStoryFromAchievement(achievement, jobTheme = null) {
+  function createStarStoryFromAchievement(achievement, jobTheme = null, targetCompany = "") {
     if (!achievement || !achievement.text) {
       return "";
     }
@@ -794,18 +796,25 @@ function removeJobSpecificLanguage(text = '') {
 
     const { action, result } = splitActionAndResult(normalized);
     const taskClause = extractTaskClause(normalized);
-    const situation = buildSituationSentence(achievement.role, taskClause || action);
+    const situation = buildSituationSentence(achievement.role, taskClause || action, jobTheme, targetCompany);
     const task = taskClause
-      ? `I needed to ${taskClause}.`
-      : "I owned this initiative end-to-end.";
+      ? `I was responsible for ${taskClause} to advance ${jobTheme || 'the business'} priorities.`
+      : `I owned this initiative end-to-end to support ${jobTheme || 'critical business'} goals.`;
     const actionSentence = action
       ? `I ${ensureLowercaseStart(action)}.`
       : "I coordinated stakeholders and executed the plan.";
     const resultSentence = result
       ? toSentenceCase(stripResultTrigger(result))
       : inferResultFromLine(normalized);
-    const question = buildQuestionFromAction(action || normalized, jobTheme, achievement.role);
-    const sampleAnswer = buildSampleAnswer({ situation, task, action: actionSentence, result: resultSentence });
+    const question = buildQuestionFromAction(action || normalized, jobTheme, achievement.role, targetCompany);
+    const sampleAnswer = buildStructuredSampleAnswer({
+      situation,
+      task,
+      action: actionSentence,
+      result: resultSentence,
+      jobTheme,
+      targetCompany
+    });
 
     return `Question: ${question} || Situation: ${situation} || Task: ${task} || Action: ${actionSentence} || Result: ${resultSentence} || Sample Answer: ${sampleAnswer}`;
   }
@@ -837,10 +846,12 @@ function removeJobSpecificLanguage(text = '') {
     return match[1].trim().replace(/^(the|a|an)\s+/i, "").trim();
   }
 
-  function buildSituationSentence(role = "", context = "") {
+  function buildSituationSentence(role = "", context = "", jobTheme = null, company = "") {
     const base = role ? `While working as ${role},` : "In this role,";
     const contextHint = context ? ensureLowercaseStart(context) : "a critical business gap";
-    return `${base} I recognized ${contextHint}.`;
+    const themePhrase = jobTheme ? ` tied to ${jobTheme}` : "";
+    const companyPhrase = company && company !== 'your team' ? ` that would translate to ${company}` : "";
+    return `${base} I recognized ${contextHint}${themePhrase}${companyPhrase}.`;
   }
 
   function ensureLowercaseStart(text = "") {
@@ -864,35 +875,45 @@ function removeJobSpecificLanguage(text = '') {
     return "Delivered measurable improvements tied to KPIs.";
   }
 
-  function buildQuestionFromAction(actionText = "", jobTheme = null, role = "") {
+  function buildQuestionFromAction(actionText = "", jobTheme = null, role = "", company = "") {
     const cleaned = (actionText || "").replace(/^I\s+/i, "").replace(/\.$/, "").trim();
     const roleContext = role ? ` in your ${role} role` : "";
     const themeContext = jobTheme ? ` focused on ${jobTheme}` : "";
+    const companyContext = company && company !== 'your team' ? ` that would resonate at ${company}` : "";
     if (!cleaned) {
-      return `Tell me about a time you drove measurable change${themeContext || roleContext}.`;
+      return `Tell me about a time you drove measurable change${themeContext || roleContext}${companyContext}.`;
     }
     const verbMatch = cleaned.match(/^[a-z]+/i);
     const verb = verbMatch ? verbMatch[0].toLowerCase() : "led";
     const remainder = cleaned.slice(verbMatch ? verbMatch[0].length : 0).trim() || "a critical initiative";
-    const baseQuestion = `Tell me about a time you ${verb} ${remainder}${roleContext}${themeContext}`.replace(/\s+/g, " ").trim();
+    const baseQuestion = `Tell me about a time you ${verb} ${remainder}${roleContext}${themeContext}${companyContext}`.replace(/\s+/g, " ").trim();
     return baseQuestion.endsWith("?") ? baseQuestion : `${baseQuestion}?`;
   }
 
-  function buildSampleAnswer(parts = {}) {
+  function buildStructuredSampleAnswer(parts = {}) {
     const segments = [];
     if (parts.situation) {
-      segments.push(parts.situation);
+      segments.push(`Situation: ${parts.situation}`);
     }
     if (parts.task) {
-      segments.push(parts.task);
+      segments.push(`Task: ${parts.task}`);
     }
     if (parts.action) {
-      segments.push(parts.action.replace(/^I\s+/i, "I "));
+      const cleanedAction = parts.action.replace(/^I\s+/i, "I ");
+      segments.push(`Action: ${cleanedAction}`);
     }
     if (parts.result) {
-      segments.push(parts.result.startsWith("Delivered") ? parts.result : `As a result, ${parts.result}`);
+      const resultText = parts.result.startsWith("Delivered") ? parts.result : `As a result, ${parts.result}`;
+      segments.push(`Result: ${resultText}`);
     }
-    return segments.join(" ");
+    if (parts.jobTheme || parts.targetCompany) {
+      const companyText = parts.targetCompany && parts.targetCompany !== 'your team'
+        ? `${parts.targetCompany}`
+        : 'the target role';
+      const themeText = parts.jobTheme || 'similar initiatives';
+      segments.push(`Tie-back: This directly supports ${companyText}'s focus on ${themeText}.`);
+    }
+    return segments.join(' ');
   }
 
   function toSentenceCase(text = "") {
