@@ -32,23 +32,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { formula, contextFile, contextFileName } = req.body || {};
+    const { formula } = req.body || {};
     if (!formula || typeof formula !== 'string' || formula.trim().length < 3) {
       res.status(400).json({ success: false, error: 'A valid formula is required.' });
       return;
     }
 
     const trimmedFormula = formula.trim();
-    const contextSnippet = contextFile && contextFile.length < 10 * 1024 * 1024
-      ? `Optional workbook context attached${contextFileName ? ` (${contextFileName})` : ''}.`
-      : 'No workbook context attached.';
-
     const userContent = `Explain the following Excel formula in structured steps.
 
 Formula:
 ${trimmedFormula}
-
-${contextSnippet}`;
+`;
 
     const requestBody = {
       model: 'gpt-4.1-mini',
@@ -59,7 +54,7 @@ ${contextSnippet}`;
         },
         {
           role: 'user',
-          content: userContent + (contextFile ? `\n\nBase64 workbook excerpt (first 2k chars):\n${contextFile.slice(0, 2000)}` : '')
+          content: userContent
         }
       ],
       temperature: 0.2,
