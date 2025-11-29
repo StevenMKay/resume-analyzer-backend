@@ -24,7 +24,11 @@ const CRITICAL_GENERIC_TERMS = new Set([
 
 const CRITICAL_SHORT_TOKENS = new Set(['ai','ml','hr','ui','ux','qa','sql','sap','api','aws','erp','crm','etl','bi','ads','pm','devops']);
 
-const BULLET_GLYPH_SOURCE = '•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾';
+const BULLET_GLYPH_SOURCE =
+  '•●◦▪▫‣·‧○◉◎▸▹►✦✧➤➔➣➥➧➨➩➪➫➬➭➮➯➱➲➳➵➸➼➽➾' +
+  '∙•■□◆◇●○▪▫➔➤⦿⦾❖❥✸✹✺✻✼✽•' +
+  '\u2022\u25CF\u25CB\u25A0\u25AA\u25AB\u2219\u2043';
+
 const createBulletRegex = (flags = 'g') => new RegExp(`[${BULLET_GLYPH_SOURCE}]`, flags);
 
 // -----------------------------------------------------------
