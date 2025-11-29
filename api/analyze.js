@@ -614,43 +614,82 @@ function buildEnhancedStarStories(rawAchievements = [], jobThemes = [], targetCo
     return [];
   }
 
+  const normalizedThemes = Array.isArray(jobThemes) ? jobThemes.filter(Boolean) : [];
+  const preparedAchievements = rawAchievements
+    .map(achievement => {
+      if (!achievement) {
+        return null;
+      }
+      if (typeof achievement === 'string') {
+        const trimmed = achievement.trim();
+        return trimmed ? { role: '', text: trimmed } : null;
+      }
+      if (typeof achievement === 'object' && typeof achievement.text === 'string') {
+        const text = achievement.text.trim();
+        if (!text) {
+          return null;
+        }
+        return {
+          role: typeof achievement.role === 'string' ? achievement.role.trim() : achievement.role || '',
+          text
+        };
+      }
+      return null;
+    })
+    .filter(Boolean);
+
   const stories = [];
+  preparedAchievements.slice(0, 6).forEach((achievement, index) => {
+    const theme = normalizedThemes.length
+      ? normalizedThemes[index % normalizedThemes.length]
+      : inferThemeFromAchievementText(achievement.text) || 'impact';
 
-  rawAchievements.slice(0, 6).forEach((ach, index) => {
-    if (!ach || typeof ach !== "string") return;
-
-    const trimmed = ach.trim().replace(/\s+/g, " ");
-
-    // Pull out any obvious metric
-    const resultMatch = trimmed.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/g);
-    const extractedMetric = resultMatch ? resultMatch[0] : null;
-
-    // Light theme mapping from job description
-    const theme = (jobThemes[index % Math.max(1, jobThemes.length)] || "impact")
-      .replace(/\s+/g, " ");
-
-    const situation = `In my role at Chase, I faced a situation where ${trimmed.toLowerCase().startsWith("managed") ? trimmed : `I was responsible for ${trimmed}`}.`;
-    const task = `My task was to take ownership, align stakeholders, and define a clear plan to improve ${theme}.`;
-    const action = `I broke the work into phases, partnered cross-functionally, tracked progress with metrics, and removed blockers using data-driven decisions.`;
-    const result = extractedMetric
-      ? `As a result, we achieved a measurable improvement, including ${extractedMetric}, and strengthened our ${theme}.`
-      : `As a result, we delivered meaningful business impact and improved our ${theme}.`;
-
-    let story =
-      `Question: Tell me about a time you demonstrated strong ${theme}.\n` +
-      `Situation: ${situation}\n` +
-      `Task: ${task}\n` +
-      `Action: ${action}\n` +
-      `Result: ${result}`;
-
-    if (targetCompany) {
-      story += `\nTie-back: This example shows the same execution, risk discipline, and cross-functional leadership ${targetCompany} is asking for in this role.`;
+    const starObject = createStarStoryFromAchievement(achievement, theme, targetCompany);
+    if (starObject) {
+      stories.push(formatStarStoryAsString(starObject));
     }
-
-    stories.push(story.trim());
   });
 
   return stories.slice(0, 4);
+}
+
+function formatStarStoryAsString(story = {}) {
+  const segments = [];
+  const addSegment = (label, value) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (trimmed) {
+      segments.push(`${label}: ${trimmed}`);
+    }
+  };
+
+  addSegment('Question', story.question);
+  addSegment('Situation', story.situation);
+  addSegment('Task', story.task);
+  addSegment('Action', story.action);
+  addSegment('Result', story.result);
+  addSegment('Sample Answer', story.answer);
+
+  return segments.join(' || ');
+}
+
+function inferThemeFromAchievementText(text = '') {
+  if (!text) {
+    return null;
+  }
+
+  const THEME_HINTS = [
+    { regex: /(risk|control|compliance|audit)/i, label: 'risk mitigation' },
+    { regex: /(revenue|sales|profit|cost savings|pipeline)/i, label: 'revenue impact' },
+    { regex: /(automation|digital|ai|machine learning|robotic|workflow)/i, label: 'automation initiatives' },
+    { regex: /(launch|rollout|implementation|deployment|go-live)/i, label: 'program launches' },
+    { regex: /(training|enablement|coaching|curriculum|academy)/i, label: 'talent enablement' },
+    { regex: /(customer|client|member|employee experience|nps)/i, label: 'customer experience' },
+    { regex: /(data|analytics|insight|dashboard|kpi|reporting)/i, label: 'data-driven decisions' },
+    { regex: /(process|workflow|efficiency|improvement|lean|six sigma)/i, label: 'process improvement' }
+  ];
+
+  const match = THEME_HINTS.find(({ regex }) => regex.test(text));
+  return match ? match.label : null;
 }
 
 function createStoryBuilderPayload(analysis, resumeText, jobDescription) {
