@@ -614,7 +614,9 @@ function buildEnhancedStarStories(rawAchievements = [], jobThemes = [], targetCo
     return [];
   }
 
-  const normalizedThemes = Array.isArray(jobThemes) ? jobThemes.filter(Boolean) : [];
+  const normalizedJobThemes = Array.from(new Set((Array.isArray(jobThemes) ? jobThemes : []).filter(Boolean)));
+  let jobThemeCursor = 0;
+
   const preparedAchievements = rawAchievements
     .map(achievement => {
       if (!achievement) {
@@ -638,20 +640,76 @@ function buildEnhancedStarStories(rawAchievements = [], jobThemes = [], targetCo
     })
     .filter(Boolean);
 
-  const stories = [];
-  preparedAchievements.slice(0, 6).forEach((achievement, index) => {
-    const inferredTheme = inferThemeFromAchievementText(achievement.text);
-    const theme = inferredTheme
-      || (normalizedThemes.length ? normalizedThemes[index % normalizedThemes.length] : null)
-      || 'impact';
+  if (!preparedAchievements.length) {
+    return [];
+  }
 
-    const starObject = createStarStoryFromAchievement(achievement, theme, targetCompany);
+  const storyCandidates = [];
+  preparedAchievements.slice(0, 6).forEach(achievement => {
+    const inferredTheme = inferThemeFromAchievementText(achievement.text) || null;
+    let selectedTheme = null;
+
+    if (jobThemeCursor < normalizedJobThemes.length) {
+      selectedTheme = normalizedJobThemes[jobThemeCursor];
+      jobThemeCursor += 1;
+    }
+
+    if (!selectedTheme) {
+      selectedTheme = inferredTheme;
+    }
+
+    const starObject = createStarStoryFromAchievement(achievement, selectedTheme, targetCompany);
     if (starObject) {
-      stories.push(formatStarStoryAsString(starObject));
+      storyCandidates.push({
+        starObject,
+        achievement,
+        theme: starObject.theme || selectedTheme || null
+      });
     }
   });
 
-  return stories.slice(0, 4);
+  if (!storyCandidates.length) {
+    return [];
+  }
+
+  const desiredStoryCount = 4;
+  const uniqueStories = [];
+  const backlog = [];
+
+  storyCandidates.forEach(candidate => {
+    const themeKey = candidate.theme || '';
+    const alreadyUsedTheme = themeKey && uniqueStories.some(entry => entry.theme === themeKey);
+    if (!alreadyUsedTheme && themeKey) {
+      uniqueStories.push(candidate);
+    } else {
+      backlog.push(candidate);
+    }
+  });
+
+  const buildQuestionKey = story => (story?.starObject?.question || '').toLowerCase().trim();
+
+  while (uniqueStories.length < desiredStoryCount && backlog.length) {
+    const candidate = backlog.shift();
+    const currentQuestionKey = buildQuestionKey(candidate);
+    const duplicateQuestion = currentQuestionKey && uniqueStories.some(entry => buildQuestionKey(entry) === currentQuestionKey);
+
+    if (duplicateQuestion || candidate.theme) {
+      const rebuilt = createStarStoryFromAchievement(candidate.achievement, null, targetCompany);
+      if (rebuilt) {
+        candidate.starObject = rebuilt;
+        candidate.theme = rebuilt.theme || null;
+      }
+    }
+
+    const refreshedKey = buildQuestionKey(candidate);
+    const questionAlreadyUsed = refreshedKey && uniqueStories.some(entry => buildQuestionKey(entry) === refreshedKey);
+    if (!questionAlreadyUsed) {
+      uniqueStories.push(candidate);
+    }
+  }
+
+  const finalStories = uniqueStories.concat(backlog).slice(0, desiredStoryCount);
+  return finalStories.map(entry => formatStarStoryAsString(entry.starObject));
 }
 
 function formatStarStoryAsString(story = {}) {
@@ -939,17 +997,18 @@ function createStarStoryFromAchievement(achievement, jobTheme = null, targetComp
 
   const { action, result } = splitActionAndResult(normalized);
   const taskClause = extractTaskClause(normalized);
+  const appliedTheme = jobTheme || inferThemeFromAchievementText(normalized) || null;
 
   const situation = buildSituationSentence(
     achievement.role,
     taskClause || action,
-    jobTheme,
+    appliedTheme,
     targetCompany
   );
 
   const task = taskClause
-    ? `I was responsible for ${taskClause} to advance ${jobTheme || 'the business'} priorities.`
-    : `I owned this initiative end-to-end to support ${jobTheme || 'critical business'} goals.`;
+    ? `I was responsible for ${taskClause} to advance ${appliedTheme || 'the business'} priorities.`
+    : `I owned this initiative end-to-end to support ${appliedTheme || 'critical business'} goals.`;
 
   const actionSentence = action
     ? `I ${ensureLowercaseStart(action)}.`
@@ -961,7 +1020,7 @@ function createStarStoryFromAchievement(achievement, jobTheme = null, targetComp
 
   const question = buildQuestionFromAction(
     action || normalized,
-    jobTheme,
+    appliedTheme,
     achievement.role,
     targetCompany
   );
@@ -971,7 +1030,7 @@ function createStarStoryFromAchievement(achievement, jobTheme = null, targetComp
     task,
     action: actionSentence,
     result: resultSentence,
-    jobTheme,
+    jobTheme: appliedTheme,
     targetCompany
   });
 
@@ -981,7 +1040,8 @@ function createStarStoryFromAchievement(achievement, jobTheme = null, targetComp
     task,
     action: actionSentence,
     result: resultSentence,
-    answer: sampleAnswer
+    answer: sampleAnswer,
+    theme: appliedTheme
   };
 }
 
