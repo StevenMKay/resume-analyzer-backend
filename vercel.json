@@ -1,4 +1,4 @@
-"{
+{
   \"functions\": {
     \"api/analyze-resume.py\": {
       \"maxDuration\": 30
@@ -34,4 +34,4 @@
     }
   ]
 }
-"
+
