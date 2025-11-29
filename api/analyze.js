@@ -601,10 +601,10 @@ function removeJobSpecificLanguage(text = '') {
   // ===============================================================
   function createStoryBuilderPayload(analysis, resumeText, jobDescription) {
     const fallback = buildStoryBuilderFallback(analysis, resumeText, jobDescription);
-    return sanitizeStoryBuilder(analysis?.storyBuilder, fallback);
+    return sanitizeStoryBuilder(analysis?.storyBuilder, fallback, resumeText, jobDescription);
   }
 
-  function sanitizeStoryBuilder(raw, fallback) {
+  function sanitizeStoryBuilder(raw, fallback, resumeText = "", jobDescription = "") {
     const base = fallback || buildStoryBuilderFallback({}, "", "");
     if (!raw || typeof raw !== "object") {
       return base;
@@ -627,7 +627,16 @@ function removeJobSpecificLanguage(text = '') {
         .slice(0, limit);
     };
 
-    const starStories = normalizeStrings(raw.starStories, 4).filter(isMeaningfulStarStory);
+    let starStories = normalizeStrings(raw.starStories, 4).filter(isMeaningfulStarStory);
+    if (!starStories.length) {
+      starStories = buildResumeDrivenStarStories(resumeText, jobDescription);
+    }
+    if (!starStories.length && Array.isArray(base.starStories)) {
+      starStories = base.starStories.filter(isMeaningfulStarStory);
+    }
+    if (!starStories.length) {
+      starStories = STAR_TEMPLATE_LIBRARY.slice(0, 4);
+    }
     const strengths = normalizeStrings(raw.tailoredStrengths, 10);
     const leadership = normalizeStrings(raw.leadershipStories, 3);
     const normalizedTellMe = typeof raw.tellMeIntro === "string" ? raw.tellMeIntro.trim() : "";
@@ -641,7 +650,7 @@ function removeJobSpecificLanguage(text = '') {
       : { weakness: "", mitigation: "" };
 
     return {
-      starStories: starStories.length ? starStories : base.starStories,
+      starStories,
       tellMeIntro: normalizedTellMe || base.tellMeIntro,
       tailoredStrengths: strengths.length ? strengths : base.tailoredStrengths,
       leadershipStories: leadership.length ? leadership : base.leadershipStories,
