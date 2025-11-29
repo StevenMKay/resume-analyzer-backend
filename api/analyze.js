@@ -112,6 +112,22 @@ const DEFAULT_CRITICAL_KEYWORDS = [
   'Governance & controls'
 ];
 
+const FLEXIBLE_PHONE_REGEX = /(\+?\d[\d\s().-]{8,}\d)/g;
+
+function containsPhoneNumber(text = '') {
+  if (!text) {
+    return false;
+  }
+  const matches = text.match(FLEXIBLE_PHONE_REGEX);
+  if (!matches) {
+    return false;
+  }
+  return matches.some(segment => {
+    const digits = segment.replace(/\D/g, '');
+    return digits.length >= 10 && digits.length <= 15;
+  });
+}
+
 export default async function handler(req, res) {
   try {
     applyCors(req, res);
@@ -340,7 +356,7 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
   const bulletCount = countBulletSymbols(resumeSource);
   const metricMatches = (resumeSource.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/gi) || []).length;
   const hasEmail = /@/.test(resumeSource);
-  const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(resumeSource);
+  const hasPhone = containsPhoneNumber(resumeSource);
   const linksInResume = (resumeSource.match(/https?:\/\/\S+/gi) || []).length;
 
   const coverageScore = clamp((wordCount / 400) * 20, 0, 20);
@@ -1736,7 +1752,7 @@ function enforceResumeCompleteness(analysis, resumeText = '', structureSignals =
   const text = typeof resumeText === 'string' ? resumeText : '';
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
   const hasEmail = /@/.test(text);
-  const hasPhone = /\b\d{3}[-.\s]*\d{3}[-.\s]*\d{4}\b/.test(text);
+  const hasPhone = containsPhoneNumber(text);
   const hasSections = structureSignals
     ? ['summary', 'experience', 'skills', 'education'].some(section =>
         structureSignals.headings?.some(heading => heading.toLowerCase().includes(section))
