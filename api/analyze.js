@@ -345,7 +345,6 @@ function extractJsonFromResponse(text) {
 }
 
 function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = '') {
-  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const safeText = typeof resumeText === 'string' ? resumeText : '';
   const normalizedResume = normalizeResumeContent(safeText);
   const resumeSource = normalizedResume || safeText;
@@ -358,35 +357,42 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
   const hasEmail = /@/.test(resumeSource);
   const hasPhone = containsPhoneNumber(resumeSource);
   const linksInResume = (resumeSource.match(/https?:\/\/\S+/gi) || []).length;
+  const keywordOverlapRatio = hasJobDescription ? compareJobKeywords(jobSource, resumeSource) : 0;
 
-  const coverageScore = clamp((wordCount / 400) * 20, 0, 20);
-  const metricsScore = clamp(metricMatches * 2.5, 0, 20);
-  const structureScore = clamp(bulletCount * 2, 0, 20);
-  const alignmentScore = hasJobDescription
-    ? clamp(compareJobKeywords(jobSource, resumeSource) * 100, 0, 20)
-    : clamp((linksInResume > 0 ? 6 : 0) + metricsScore * 0.3, 0, 20);
-  const overallScore = clamp(55 + coverageScore + metricsScore + structureScore + alignmentScore, 55, 93);
+  const contactStatus = hasEmail && hasPhone ? 'good' : (hasEmail || hasPhone ? 'warning' : 'critical');
+  const summaryStatus = wordCount >= 340 ? 'good' : (wordCount >= 200 ? 'warning' : 'critical');
+  const experienceStatus = metricMatches >= 6 || bulletCount >= 8 ? 'good' : (metricMatches >= 3 ? 'warning' : 'critical');
+  const skillsStatus = bulletCount >= 7 || linksInResume > 0 ? 'warning' : 'critical';
+  const educationStatus = wordCount >= 250 ? 'warning' : 'critical';
+  const keywordStatus = hasJobDescription
+    ? (keywordOverlapRatio >= 0.35 ? 'good' : (keywordOverlapRatio >= 0.2 ? 'warning' : 'critical'))
+    : 'warning';
 
   const categories = [
-    makeFallbackCategory('Contact Information', hasEmail && hasPhone ? 'good' : 'warning', hasEmail && hasPhone ? 88 : 71, hasEmail && hasPhone ? 'Header contains email and phone.' : 'Contact block missing either email or phone.', [
-      hasEmail ? 'Make sure the email is placed near the name.' : 'Add a professional email address near the header.',
-      hasPhone ? 'Keep the phone number near the header so recruiters can contact you quickly.' : 'Add a reachable phone number; recruiters expect both email and phone.'
+    makeFallbackCategory('Contact Information', contactStatus, hasEmail && hasPhone ? 'Header contains email and phone.' : 'Contact block missing either email or phone.', [
+      hasEmail ? 'Place your professional email near the header.' : 'Add a professional email address by your name.',
+      hasPhone ? 'Keep the phone number visible near the contact block.' : 'Add a phone number so recruiters have a fast contact method.'
     ].filter(Boolean)),
-    makeFallbackCategory('Professional Summary', overallScore > 80 ? 'good' : 'warning', clamp(overallScore + 2, 60, 92), 'Summary detected. Ensure it highlights scale, scope, and impact.', ['Add 1-2 quantified wins in the first 3 lines.', 'Mention domain expertise or tools tied to your most recent roles.']),
-    makeFallbackCategory('Work Experience', overallScore > 82 ? 'good' : 'warning', clamp(overallScore - 3, 58, 90), 'Experience section detected. Use bullet verbs plus metrics.', ['Keep bullet length under 40 words.', 'Lead with action verb + measurable outcome.']),
-    makeFallbackCategory('Skills Section', 'warning', 74, 'Skills are present—surface the tools you rely on most so scanners see them instantly.', [
+    makeFallbackCategory('Professional Summary', summaryStatus, 'Summary detected. Ensure it highlights scale, scope, and impact.', [
+      'Add 1-2 quantified wins in the first 3 lines.',
+      'Mention domain expertise or tools tied to your most recent roles.'
+    ]),
+    makeFallbackCategory('Work Experience', experienceStatus, 'Experience section detected. Use bullet verbs plus metrics.', [
+      'Keep bullet length under 40 words.',
+      'Lead with action verb + measurable outcome.'
+    ]),
+    makeFallbackCategory('Skills Section', skillsStatus, 'Skills are present—surface the tools you rely on most so scanners see them instantly.', [
       'Lead with the tools and platforms you use most often (SQL, Python, SharePoint, AI initiatives).',
       hasJobDescription ? 'Mirror the job posting keywords.' : 'Highlight the tools, platforms, and leadership strengths that fit your target roles.'
     ]),
-    makeFallbackCategory('Education', 'warning', 72, 'Education present—ensure graduation years are current.', ['Add certifications or licenses relevant to the target job.']),
+    makeFallbackCategory('Education', educationStatus, 'Education present—ensure graduation years are current.', ['Add certifications or licenses relevant to the target job.'])
   ];
 
   if (hasJobDescription) {
     categories.push(
       makeFallbackCategory(
         'Job Match & Keywords',
-        'warning',
-        70,
+        keywordStatus,
         'Ensure the resume echoes critical phrases from the job description and stays ATS-safe.',
         [
           'Spell out acronyms once (e.g., Key Performance Indicators (KPIs)).',
@@ -399,27 +405,35 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
       makeFallbackCategory(
         'Keyword Optimization',
         'warning',
-        72,
         'Prioritize high-value skills and technologies so the resume scans well even without a specific job posting.',
         [
           'Cluster related skills and move the most marketable ones to the top of the list.',
-          'Use universally recognized role titles and ATS-friendly phrasing (no graphics or tables).' 
+          'Use universally recognized role titles and ATS-friendly phrasing (no graphics or tables).'
         ]
       )
     );
   }
 
+  const completenessStatus = contactStatus === 'good' && summaryStatus !== 'critical' && bulletCount >= 5
+    ? 'good'
+    : (bulletCount >= 3 ? 'warning' : 'critical');
+  const completenessDetails = completenessStatus === 'good'
+    ? 'Contact basics detected. Continue reinforcing measurable outcomes.'
+    : 'Add a complete contact block, standard section headings, and 400+ words before the next review.';
+
   const extraInsights = [
     {
       title: 'Resume Completeness',
-      status: overallScore > 80 ? 'good' : 'warning',
-      details: hasEmail && hasPhone ? 'Contact basics detected. Continue reinforcing measurable outcomes.' : 'Add a complete contact block with phone + professional email.',
-      tips: ['Keep total length near 650-750 words for mid-senior roles.', 'Use consistent bullet symbols and tense.']
+      status: completenessStatus,
+      details: completenessDetails,
+      tips: [
+        bulletCount < 5 ? 'Add more bullet points so accomplishments are scannable.' : 'Keep total length near 650-750 words for mid-senior roles.',
+        hasJobDescription ? 'Mirror the job posting keywords in summary and skills.' : 'Mention target industries and platforms near the top.'
+      ]
     }
   ];
 
   const fallbackAnalysis = {
-    overallScore,
     categories,
     companyInsights: [],
     extraInsights,
@@ -430,8 +444,8 @@ function createFallbackAnalysis(resumeText, hasJobDescription, jobDescription = 
   return fallbackAnalysis;
 }
 
-function makeFallbackCategory(name, status, score, feedback, suggestions) {
-  return { name, status, score, feedback, suggestions };
+function makeFallbackCategory(name, status, feedback, suggestions = []) {
+  return { name, status, feedback, suggestions };
 }
 
 function compareJobKeywords(jobText, resumeText) {
@@ -458,11 +472,6 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
   const fixes = [];
   const hasJobDescription = Boolean(jobDescription && jobDescription.trim());
 
-  if (typeof analysis.overallScore !== 'number') {
-    analysis.overallScore = 78;
-    fixes.push('overallScore missing; defaulted to 78.');
-  }
-
   if (!Array.isArray(analysis.categories)) {
     analysis.categories = [];
     fixes.push('categories missing; defaulted to empty array.');
@@ -474,11 +483,15 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
   } else {
     analysis.categories = analysis.categories.map(category => {
       if (!category || typeof category !== 'object') {
-        return makeFallbackCategory('General', 'warning', 72, 'Category data missing.', ['Ensure JSON matches schema.']);
+        return makeFallbackCategory('General', 'warning', 'Category data missing.', ['Ensure JSON matches schema.']);
       }
 
-      const safeScore = clampNumber(category.score, 0, 100, 72);
-      const status = deriveStatusFromScore(safeScore);
+      const numericScore = typeof category.score === 'number' ? clampNumber(category.score, 0, 100, category.score) : null;
+      const providedStatus = typeof category.status === 'string' ? category.status.toLowerCase() : '';
+      let status = ['good', 'warning', 'critical'].includes(providedStatus) ? providedStatus : null;
+      if (!status) {
+        status = numericScore !== null ? deriveStatusFromScore(numericScore) : 'warning';
+      }
       const suggestions = Array.isArray(category.suggestions)
         ? category.suggestions.filter(item => typeof item === 'string' && item.trim().length)
         : [];
@@ -515,7 +528,6 @@ function validateAndFixAnalysis(analysis, resumeText, jobDescription) {
       return {
         name: cleanedName,
         status,
-        score: safeScore,
         scoreExplanation: cleanedExplanation,
         feedback: cleanedFeedback,
         suggestions: cleanedSuggestions
@@ -1339,8 +1351,7 @@ function createStarStoryFromAchievement(achievement, jobTheme = null, targetComp
     const focusArea = strengths.length ? strengths.slice(0, 3).join(", ") : "program leadership, analytics, and stakeholder alignment";
     const company = extractCompanyFromJobDescription(jobDescription);
     const highlight = analysis?.extraInsights?.[0]?.details || "deliver measurable improvements end-to-end.";
-    const score = Number(analysis?.overallScore) || 75;
-    return `I blend ${focusArea} to keep initiatives on track. This resume currently scores ${score}/100, and I'm targeting ${company} so we can ${highlight}`;
+    return `I blend ${focusArea} to keep initiatives on track, and recent analysis already flags the resume as recruiter-ready. I'm targeting ${company} so we can ${highlight}`;
   }
 
   const COMPANY_STOPWORDS = new Set([
@@ -1824,9 +1835,6 @@ function applyPositiveSignalBoost(analysis, resumeText = '', structureSignals = 
     return analysis;
   }
 
-  const baseScore = typeof analysis.overallScore === 'number' ? analysis.overallScore : 75;
-  analysis.overallScore = Math.min(100, baseScore + boost);
-
   if (!Array.isArray(analysis.extraInsights)) {
     analysis.extraInsights = [];
   }
@@ -1916,8 +1924,8 @@ function buildExecutiveStrengthInsight(signals, boost, highlights = []) {
   if (signals.innovationMentions) detailParts.push(`${signals.innovationMentions} innovation mentions`);
 
   const details = detailParts.length
-    ? `Detected ${detailParts.join(', ')}. Score boosted +${boost} to reflect executive impact.`
-    : `Score boosted +${boost} to reflect strong executive signaling.`;
+    ? `Detected ${detailParts.join(', ')}—resume already signals executive-level impact.`
+    : 'Resume already signals executive-level impact.';
 
   const tips = highlights.length ? highlights : ['Keep spotlighting measurable outcomes, timelines, and strategic initiatives.'];
 
@@ -1938,8 +1946,7 @@ ${resumeText}
 """
 
 Return JSON with these keys:
-- overallScore: number 0-100
-- categories: array of objects { name, status, score, feedback, suggestions[] } summarizing summary/experience/skills/etc
+- categories: array of objects { name, status ("good"|"warning"|"critical"), feedback, scoreExplanation, suggestions[] } summarizing summary/experience/skills/etc
 - companyInsights: 1-3 entries that combine public intel about the company(s) cited in the resume with specific actions the candidate can take; each entry must include fields { source: "resume"|"jobDescription"|"public knowledge", insight, action, link }
 - extraInsights: array of themed cards { title, status, details, tips[] }
 - criticalKeywords: 15 phrases that show the most ATS-relevant language to mirror
@@ -1958,7 +1965,7 @@ Make every section specific to the resume text, with no placeholder language. JS
 }
 
 function createJobMatchingPrompt(resumeText, jobDescription) {
-  return `You are analyzing a resume against the provided job description. Produce JSON only using the same schema (overallScore, categories, companyInsights, extraInsights, criticalKeywords, storyBuilder). Explicitly align every section to the role requirements, highlighting keyword gaps, ATS considerations, and interviewer talking points.
+  return `You are analyzing a resume against the provided job description. Produce JSON only using the same schema (categories, companyInsights, extraInsights, criticalKeywords, storyBuilder). Explicitly align every section to the role requirements, highlighting keyword gaps, ATS considerations, and interviewer talking points.
 
 CompanyInsights instructions:
 - Provide 2-3 entries.
