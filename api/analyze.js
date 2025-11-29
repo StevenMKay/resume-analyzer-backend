@@ -599,6 +599,60 @@ function removeJobSpecificLanguage(text = '') {
   // ===============================================================
   //  INTERVIEW STORY BUILDER — AI + fallback support
   // ===============================================================
+
+/**
+ * Enhanced STAR Story Builder (Upgrade Module)
+ * Generates highly structured, clarified, and interviewer-ready STAR stories.
+ * Works with extracted achievements, job themes, or fallback stories.
+ */
+function buildEnhancedStarStories(rawAchievements = [], jobThemes = [], targetCompany = null) {
+  if (!Array.isArray(rawAchievements) || !rawAchievements.length) {
+    return [];
+  }
+
+  const cleanedStories = [];
+
+  rawAchievements.slice(0, 6).forEach((ach, index) => {
+    if (!ach || typeof ach !== "string") return;
+
+    // Extract potential numbers or outcomes
+    const resultMatch = ach.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/g);
+    const extractedMetric = resultMatch ? resultMatch[0] : null;
+
+    // Match theme to story
+    const theme = jobThemes[index % Math.max(1, jobThemes.length)] || "impact";
+
+    // Rewrite into strong STAR format
+    const starObject = {
+      question: `Tell me about a time you demonstrated strong ${theme}.`,
+      situation: `At my previous role, I faced a challenge involving ${ach.split(" ").slice(0, 10).join(" ")}...`,
+      task: `My responsibility was to take ownership of the issue, define the requirements, and ensure alignment across stakeholders.`,
+      action: `To solve this, I broke the work into phases, partnered cross-functionally, removed blockers, and drove execution using data-driven decision-making.`,
+      result: extractedMetric
+        ? `As a result, we achieved measurable improvement including ${extractedMetric}, exceeding expectations.`
+        : `As a result, the effort delivered meaningful business impact and improved operational outcomes.`,
+      narrative: ""
+    };
+
+    // Construct final story narrative
+    starObject.narrative =
+      `**Situation:** ${starObject.situation} ` +
+      `**Task:** ${starObject.task} ` +
+      `**Action:** ${starObject.action} ` +
+      `**Result:** ${starObject.result}`;
+
+    // Apply optional company personalization
+    if (targetCompany) {
+      starObject.narrative += ` This example demonstrates the same qualities ${targetCompany} values in this role.`;
+    }
+
+    cleanedStories.push(starObject);
+  });
+
+  return cleanedStories.slice(0, 4);
+}
+
+
   function createStoryBuilderPayload(analysis, resumeText, jobDescription) {
     const fallback = buildStoryBuilderFallback(analysis, resumeText, jobDescription);
     return sanitizeStoryBuilder(analysis?.storyBuilder, fallback, resumeText, jobDescription);
@@ -699,16 +753,22 @@ function removeJobSpecificLanguage(text = '') {
     if (!achievements.length) {
       return [];
     }
-    const jobThemes = deriveJobThemes(jobDescription);
-    const targetCompany = extractCompanyFromJobDescription(jobDescription);
-    return achievements
-      .map((achievement, index) => createStarStoryFromAchievement(
-        achievement,
-        jobThemes[index % Math.max(1, jobThemes.length)] || null,
-        targetCompany
-      ))
-      .filter(Boolean)
-      .slice(0, 4);
+  // Enhanced STAR Story Generation
+const jobThemes = deriveJobThemes(jobDescription);
+const targetCompany = extractCompanyFromJobDescription(jobDescription);
+
+// Use upgraded STAR builder instead of createStarStoryFromAchievement
+const enhancedStories = buildEnhancedStarStories(
+  achievements,
+  jobThemes,
+  targetCompany
+);
+
+// If enhanced stories exist, return them. Otherwise fallback to templates.
+return enhancedStories.length 
+  ? enhancedStories.slice(0, 4)
+  : STAR_TEMPLATE_LIBRARY.slice(0, 4);
+
   }
 
   function deriveJobThemes(jobDescription = "") {
