@@ -681,10 +681,25 @@ function buildEnhancedStarStories(rawAchievements = [], jobThemes = [], targetCo
         .slice(0, limit);
     };
 
-    let starStories = normalizeStrings(raw.starStories, 4).filter(isMeaningfulStarStory);
-    if (!starStories.length) {
-      starStories = buildResumeDrivenStarStories(resumeText, jobDescription);
-    }
+  // ALWAYS override AI STAR stories with enhanced STAR logic
+const resumeAchievements = extractResumeAchievements(resumeText).slice(0, 6);
+const jobThemes = deriveJobThemes(jobDescription);
+const targetCompany = extractCompanyFromJobDescription(jobDescription);
+
+let starStories = buildEnhancedStarStories(
+    resumeAchievements,
+    jobThemes,
+    targetCompany
+);
+
+// If enhanced stories fail, fallback to AI or template library
+if (!starStories.length) {
+    starStories = normalizeStrings(raw.starStories, 4).filter(Boolean);
+}
+if (!starStories.length) {
+    starStories = STAR_TEMPLATE_LIBRARY.slice(0, 4);
+}
+
     if (!starStories.length && Array.isArray(base.starStories)) {
       starStories = base.starStories.filter(isMeaningfulStarStory);
     }
