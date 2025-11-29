@@ -863,40 +863,64 @@ return enhancedStories.length
     }
     return /(vice president|director|manager|lead|leader|consultant|analyst|engineer|specialist|head|principal)/i.test(line);
   }
-
-  function createStarStoryFromAchievement(achievement, jobTheme = null, targetCompany = "") {
-    if (!achievement || !achievement.text) {
-      return "";
-    }
-    const normalized = achievement.text.replace(/\s+/g, " ").trim();
-    if (!normalized) {
-      return "";
-    }
-
-    const { action, result } = splitActionAndResult(normalized);
-    const taskClause = extractTaskClause(normalized);
-    const situation = buildSituationSentence(achievement.role, taskClause || action, jobTheme, targetCompany);
-    const task = taskClause
-      ? `I was responsible for ${taskClause} to advance ${jobTheme || 'the business'} priorities.`
-      : `I owned this initiative end-to-end to support ${jobTheme || 'critical business'} goals.`;
-    const actionSentence = action
-      ? `I ${ensureLowercaseStart(action)}.`
-      : "I coordinated stakeholders and executed the plan.";
-    const resultSentence = result
-      ? toSentenceCase(stripResultTrigger(result))
-      : inferResultFromLine(normalized);
-    const question = buildQuestionFromAction(action || normalized, jobTheme, achievement.role, targetCompany);
-    const sampleAnswer = buildStructuredSampleAnswer({
-      situation,
-      task,
-      action: actionSentence,
-      result: resultSentence,
-      jobTheme,
-      targetCompany
-    });
-
-    return `Question: ${question} || Situation: ${situation} || Task: ${task} || Action: ${actionSentence} || Result: ${resultSentence} || Sample Answer: ${sampleAnswer}`;
+function createStarStoryFromAchievement(achievement, jobTheme = null, targetCompany = "") {
+  if (!achievement || !achievement.text) {
+    return null;
   }
+
+  const normalized = achievement.text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const { action, result } = splitActionAndResult(normalized);
+  const taskClause = extractTaskClause(normalized);
+
+  const situation = buildSituationSentence(
+    achievement.role,
+    taskClause || action,
+    jobTheme,
+    targetCompany
+  );
+
+  const task = taskClause
+    ? `I was responsible for ${taskClause} to advance ${jobTheme || 'the business'} priorities.`
+    : `I owned this initiative end-to-end to support ${jobTheme || 'critical business'} goals.`;
+
+  const actionSentence = action
+    ? `I ${ensureLowercaseStart(action)}.`
+    : "I coordinated stakeholders and executed the plan.";
+
+  const resultSentence = result
+    ? toSentenceCase(stripResultTrigger(result))
+    : inferResultFromLine(normalized);
+
+  const question = buildQuestionFromAction(
+    action || normalized,
+    jobTheme,
+    achievement.role,
+    targetCompany
+  );
+
+  const sampleAnswer = buildStructuredSampleAnswer({
+    situation,
+    task,
+    action: actionSentence,
+    result: resultSentence,
+    jobTheme,
+    targetCompany
+  });
+
+  return {
+    question,
+    situation,
+    task,
+    action: actionSentence,
+    result: resultSentence,
+    answer: sampleAnswer
+  };
+}
+
 
   const RESULT_TRIGGER_REGEX = /(resulted in|resulting in|leading to|led to|which led to|driving|drove|generated|creating|producing|delivering|delivered|achieving|achieved|boosting|increasing|reducing|improving|improved)/i;
 
