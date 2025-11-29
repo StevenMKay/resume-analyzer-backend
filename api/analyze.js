@@ -600,178 +600,211 @@ function removeJobSpecificLanguage(text = '') {
   return cleaned.trim();
 }
 
-  // ===============================================================
-  //  INTERVIEW STORY BUILDER — AI + fallback support
-  // ===============================================================
+// ===============================================================
+//  INTERVIEW STORY BUILDER — AI + fallback support
+// ===============================================================
 
 /**
  * Enhanced STAR Story Builder (Upgrade Module)
- * Generates highly structured, clarified, and interviewer-ready STAR stories.
- * Works with extracted achievements, job themes, or fallback stories.
+ * Generates clearer, interviewer-ready STAR stories.
+ * We still ultimately return STRINGS so the front-end UI does not need to change.
  */
 function buildEnhancedStarStories(rawAchievements = [], jobThemes = [], targetCompany = null) {
   if (!Array.isArray(rawAchievements) || !rawAchievements.length) {
     return [];
   }
 
-  const cleanedStories = [];
+  const stories = [];
 
   rawAchievements.slice(0, 6).forEach((ach, index) => {
     if (!ach || typeof ach !== "string") return;
 
-    // Extract potential numbers or outcomes
-    const resultMatch = ach.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/g);
+    const trimmed = ach.trim().replace(/\s+/g, " ");
+
+    // Pull out any obvious metric
+    const resultMatch = trimmed.match(/\b\d{1,3}(?:[,\.]\d{3})*(?:%|\+|x)?/g);
     const extractedMetric = resultMatch ? resultMatch[0] : null;
 
-    // Match theme to story
-    const theme = jobThemes[index % Math.max(1, jobThemes.length)] || "impact";
+    // Light theme mapping from job description
+    const theme = (jobThemes[index % Math.max(1, jobThemes.length)] || "impact")
+      .replace(/\s+/g, " ");
 
-    // Rewrite into strong STAR format
-    const starObject = {
-      question: `Tell me about a time you demonstrated strong ${theme}.`,
-      situation: `At my previous role, I faced a challenge involving ${ach.split(" ").slice(0, 10).join(" ")}...`,
-      task: `My responsibility was to take ownership of the issue, define the requirements, and ensure alignment across stakeholders.`,
-      action: `To solve this, I broke the work into phases, partnered cross-functionally, removed blockers, and drove execution using data-driven decision-making.`,
-      result: extractedMetric
-        ? `As a result, we achieved measurable improvement including ${extractedMetric}, exceeding expectations.`
-        : `As a result, the effort delivered meaningful business impact and improved operational outcomes.`,
-      narrative: ""
-    };
+    const situation = `In my role at Chase, I faced a situation where ${trimmed.toLowerCase().startsWith("managed") ? trimmed : `I was responsible for ${trimmed}`}.`;
+    const task = `My task was to take ownership, align stakeholders, and define a clear plan to improve ${theme}.`;
+    const action = `I broke the work into phases, partnered cross-functionally, tracked progress with metrics, and removed blockers using data-driven decisions.`;
+    const result = extractedMetric
+      ? `As a result, we achieved a measurable improvement, including ${extractedMetric}, and strengthened our ${theme}.`
+      : `As a result, we delivered meaningful business impact and improved our ${theme}.`;
 
-    // Construct final story narrative
-    starObject.narrative =
-      `**Situation:** ${starObject.situation} ` +
-      `**Task:** ${starObject.task} ` +
-      `**Action:** ${starObject.action} ` +
-      `**Result:** ${starObject.result}`;
+    let story =
+      `Question: Tell me about a time you demonstrated strong ${theme}.\n` +
+      `Situation: ${situation}\n` +
+      `Task: ${task}\n` +
+      `Action: ${action}\n` +
+      `Result: ${result}`;
 
-    // Apply optional company personalization
     if (targetCompany) {
-      starObject.narrative += ` This example demonstrates the same qualities ${targetCompany} values in this role.`;
+      story += `\nTie-back: This example shows the same execution, risk discipline, and cross-functional leadership ${targetCompany} is asking for in this role.`;
     }
 
-    cleanedStories.push(starObject);
+    stories.push(story.trim());
   });
 
-  return cleanedStories.slice(0, 4);
+  return stories.slice(0, 4);
 }
 
+function createStoryBuilderPayload(analysis, resumeText, jobDescription) {
+  const fallback = buildStoryBuilderFallback(analysis, resumeText, jobDescription);
+  return sanitizeStoryBuilder(analysis?.storyBuilder, fallback, resumeText, jobDescription);
+}
 
-  function createStoryBuilderPayload(analysis, resumeText, jobDescription) {
-    const fallback = buildStoryBuilderFallback(analysis, resumeText, jobDescription);
-    return sanitizeStoryBuilder(analysis?.storyBuilder, fallback, resumeText, jobDescription);
+function sanitizeStoryBuilder(raw, fallback, resumeText = "", jobDescription = "") {
+  const base = fallback || buildStoryBuilderFallback({}, "", "");
+  if (!raw || typeof raw !== "object") {
+    return base;
   }
 
-  function sanitizeStoryBuilder(raw, fallback, resumeText = "", jobDescription = "") {
-    const base = fallback || buildStoryBuilderFallback({}, "", "");
-    if (!raw || typeof raw !== "object") {
-      return base;
-    }
+  const normalizeStrings = (entries, limit) => {
+    if (!Array.isArray(entries)) return [];
+    return entries
+      .map(entry => {
+        if (typeof entry === "string") return entry.trim();
+        if (entry && typeof entry === "object") {
+          const parts = [
+            entry.title,
+            entry.story,
+            entry.summary,
+            entry.scenario,
+            entry.situation,
+            entry.action,
+            entry.result
+          ]
+            .map(part => (typeof part === "string" ? part.trim() : ""))
+            .filter(Boolean);
+          return parts.join(" — ").trim();
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .slice(0, limit);
+  };
 
-    const normalizeStrings = (entries, limit) => {
-      if (!Array.isArray(entries)) return [];
-      return entries
-        .map(entry => {
-          if (typeof entry === "string") return entry.trim();
-          if (entry && typeof entry === "object") {
-            const parts = [entry.title, entry.story, entry.summary, entry.scenario, entry.situation, entry.action, entry.result]
-              .map(part => (typeof part === "string" ? part.trim() : ""))
-              .filter(Boolean);
-            return parts.join(" — ").trim();
-          }
-          return "";
-        })
-        .filter(Boolean)
-        .slice(0, limit);
-    };
+  // 1) Always TRY to build improved STAR stories from resume + job
+  const resumeAchievements = extractResumeAchievements(resumeText).slice(0, 6);
+  const jobThemes = deriveJobThemes(jobDescription);
+  const targetCompany = extractCompanyFromJobDescription(jobDescription);
 
-  // ALWAYS override AI STAR stories with enhanced STAR logic
-const resumeAchievements = extractResumeAchievements(resumeText).slice(0, 6);
-const jobThemes = deriveJobThemes(jobDescription);
-const targetCompany = extractCompanyFromJobDescription(jobDescription);
-
-let starStories = buildEnhancedStarStories(
+  // Enhanced builder returns nicely formatted strings already
+  let starStories = buildEnhancedStarStories(
     resumeAchievements,
     jobThemes,
     targetCompany
-);
+  );
 
-// If enhanced stories fail, fallback to AI or template library
-if (!starStories.length) {
-    starStories = normalizeStrings(raw.starStories, 4).filter(Boolean);
-}
-if (!starStories.length) {
+  // 2) If that fails, fall back to AI-provided stories
+  if (!starStories.length && Array.isArray(raw.starStories)) {
+    starStories = normalizeStrings(raw.starStories, 4).filter(isMeaningfulStarStory);
+  }
+
+  // 3) Then fallback to base + template library
+  if (!starStories.length && Array.isArray(base.starStories)) {
+    starStories = base.starStories.filter(isMeaningfulStarStory);
+  }
+  if (!starStories.length) {
     starStories = STAR_TEMPLATE_LIBRARY.slice(0, 4);
-}
+  }
 
-    if (!starStories.length && Array.isArray(base.starStories)) {
-      starStories = base.starStories.filter(isMeaningfulStarStory);
-    }
-    if (!starStories.length) {
-      starStories = STAR_TEMPLATE_LIBRARY.slice(0, 4);
-    }
-    const strengths = normalizeStrings(raw.tailoredStrengths, 10);
-    const leadership = normalizeStrings(raw.leadershipStories, 3);
-    const normalizedTellMe = typeof raw.tellMeIntro === "string" ? raw.tellMeIntro.trim() : "";
-    const normalizedPitch = typeof raw.elevatorPitch === "string" ? raw.elevatorPitch.trim() : "";
+  const strengths = normalizeStrings(raw.tailoredStrengths, 10);
+  const leadership = normalizeStrings(raw.leadershipStories, 3);
+  const normalizedTellMe = typeof raw.tellMeIntro === "string" ? raw.tellMeIntro.trim() : "";
+  const normalizedPitch = typeof raw.elevatorPitch === "string" ? raw.elevatorPitch.trim() : "";
 
-    const weaknessObj = raw.weaknessMitigation && typeof raw.weaknessMitigation === "object"
-      ? {
-          weakness: typeof raw.weaknessMitigation.weakness === "string" ? raw.weaknessMitigation.weakness.trim() : "",
-          mitigation: typeof raw.weaknessMitigation.mitigation === "string" ? raw.weaknessMitigation.mitigation.trim() : ""
-        }
-      : { weakness: "", mitigation: "" };
+  const weaknessObj = raw.weaknessMitigation && typeof raw.weaknessMitigation === "object"
+    ? {
+        weakness: typeof raw.weaknessMitigation.weakness === "string"
+          ? raw.weaknessMitigation.weakness.trim()
+          : "",
+        mitigation: typeof raw.weaknessMitigation.mitigation === "string"
+          ? raw.weaknessMitigation.mitigation.trim()
+          : ""
+      }
+    : { weakness: "", mitigation: "" };
 
-    return {
-      starStories,
-      tellMeIntro: normalizedTellMe || base.tellMeIntro,
-      tailoredStrengths: strengths.length ? strengths : base.tailoredStrengths,
-      leadershipStories: leadership.length ? leadership : base.leadershipStories,
-      weaknessMitigation: (weaknessObj.weakness || weaknessObj.mitigation)
+  return {
+    starStories,
+    tellMeIntro: normalizedTellMe || base.tellMeIntro,
+    tailoredStrengths: strengths.length ? strengths : base.tailoredStrengths,
+    leadershipStories: leadership.length ? leadership : base.leadershipStories,
+    weaknessMitigation:
+      weaknessObj.weakness || weaknessObj.mitigation
         ? weaknessObj
         : base.weaknessMitigation,
-      elevatorPitch: normalizedPitch || base.elevatorPitch
-    };
+    elevatorPitch: normalizedPitch || base.elevatorPitch
+  };
+}
+
+function isMeaningfulStarStory(entry = "") {
+  if (!entry || typeof entry !== "string") {
+    return false;
+  }
+  const text = entry.toLowerCase();
+  const hasQuestionLabel =
+    /question\s*[:|-]/i.test(entry) || /tell me about/i.test(entry);
+  if (!hasQuestionLabel) {
+    return false;
+  }
+  const contactSignal =
+    /(contact info|contact information|email address|phone number|linkedin profile|resume header)/i;
+  const formattingSignal =
+    /(resume (?:format|layout|template)|skills section|bullet length|header contains)/i;
+  return !contactSignal.test(text) && !formattingSignal.test(text);
+}
+
+function buildStoryBuilderFallback(analysis = {}, resumeText = "", jobDescription = "") {
+  const resumeStarStories = buildResumeDrivenStarStories(resumeText, jobDescription);
+  const starStories = resumeStarStories.length ? resumeStarStories : deriveStarStories(analysis);
+  const strengths = deriveStrengths(analysis);
+  const leadershipStories = deriveLeadershipStories(resumeText, analysis);
+  const weaknessMitigation = deriveWeaknessMitigation(analysis);
+
+  const defaultStarStories = starStories.length
+    ? starStories
+    : STAR_TEMPLATE_LIBRARY.slice(0, 3);
+
+  return {
+    starStories: defaultStarStories,
+    tellMeIntro: deriveTellMeIntro(analysis, resumeText, jobDescription),
+    tailoredStrengths: strengths.length
+      ? strengths
+      : ["Program leadership", "Stakeholder alignment", "Metric-driven decisions"],
+    leadershipStories: leadershipStories.length
+      ? leadershipStories
+      : ["Explain how you aligned cross-functional partners to deliver a measurable win."],
+    weaknessMitigation,
+    elevatorPitch: deriveElevatorPitch(analysis, strengths, jobDescription)
+  };
+}
+
+function buildResumeDrivenStarStories(resumeText = "", jobDescription = "") {
+  const achievements = extractResumeAchievements(resumeText).slice(0, 6);
+  if (!achievements.length) {
+    return [];
   }
 
-  function isMeaningfulStarStory(entry = "") {
-    if (!entry || typeof entry !== "string") {
-      return false;
-    }
-    const text = entry.toLowerCase();
-    const hasQuestionLabel = /question\s*[:|-]/i.test(entry) || /tell me about/i.test(entry);
-    if (!hasQuestionLabel) {
-      return false;
-    }
-    const contactSignal = /(contact info|contact information|email address|phone number|linkedin profile|resume header)/i;
-    const formattingSignal = /(resume (?:format|layout|template)|skills section|bullet length|header contains)/i;
-    return !contactSignal.test(text) && !formattingSignal.test(text);
-  }
+  const jobThemes = deriveJobThemes(jobDescription);
+  const targetCompany = extractCompanyFromJobDescription(jobDescription);
 
-  function buildStoryBuilderFallback(analysis = {}, resumeText = "", jobDescription = "") {
-    const resumeStarStories = buildResumeDrivenStarStories(resumeText, jobDescription);
-    const starStories = resumeStarStories.length ? resumeStarStories : deriveStarStories(analysis);
-    const strengths = deriveStrengths(analysis);
-    const leadershipStories = deriveLeadershipStories(resumeText, analysis);
-    const weaknessMitigation = deriveWeaknessMitigation(analysis);
+  const enhancedStories = buildEnhancedStarStories(
+    achievements,
+    jobThemes,
+    targetCompany
+  );
 
-    const defaultStarStories = starStories.length ? starStories : STAR_TEMPLATE_LIBRARY.slice(0, 3);
+  return enhancedStories.length
+    ? enhancedStories.slice(0, 4)
+    : STAR_TEMPLATE_LIBRARY.slice(0, 4);
+}
 
-    return {
-      starStories: defaultStarStories,
-      tellMeIntro: deriveTellMeIntro(analysis, resumeText, jobDescription),
-      tailoredStrengths: strengths.length ? strengths : ["Program leadership", "Stakeholder alignment", "Metric-driven decisions"],
-      leadershipStories: leadershipStories.length ? leadershipStories : ["Explain how you aligned cross-functional partners to deliver a measurable win."],
-      weaknessMitigation,
-      elevatorPitch: deriveElevatorPitch(analysis, strengths, jobDescription)
-    };
-  }
-
-  function buildResumeDrivenStarStories(resumeText = "", jobDescription = "") {
-    const achievements = extractResumeAchievements(resumeText).slice(0, 6);
-    if (!achievements.length) {
-      return [];
-    }
   // Enhanced STAR Story Generation
 const jobThemes = deriveJobThemes(jobDescription);
 const targetCompany = extractCompanyFromJobDescription(jobDescription);
