@@ -1,30 +1,37 @@
-{
-  "functions": {
-    "api/analyze.js": {
-      "maxDuration": 30
+"{
+  \"functions\": {
+    \"api/analyze-resume.py\": {
+      \"maxDuration\": 30
     }
   },
-  "headers": [
+  \"builds\": [
     {
-      "source": "/api/(.*)",
-      "headers": [
+      \"src\": \"api/analyze-resume.py\",
+      \"use\": \"@vercel/python\"
+    }
+  ],
+  \"headers\": [
+    {
+      \"source\": \"/api/(.*)\",
+      \"headers\": [
         {
-          "key": "Access-Control-Allow-Origin",
-          "value": "https://www.careersolutionsfortoday.com"
+          \"key\": \"Access-Control-Allow-Origin\",
+          \"value\": \"https://www.careersolutionsfortoday.com\"
         },
         {
-          "key": "Access-Control-Allow-Methods",
-          "value": "POST, OPTIONS"
+          \"key\": \"Access-Control-Allow-Methods\",
+          \"value\": \"POST, OPTIONS\"
         },
         {
-          "key": "Access-Control-Allow-Headers",
-          "value": "Content-Type"
+          \"key\": \"Access-Control-Allow-Headers\",
+          \"value\": \"Content-Type\"
         },
         {
-          "key": "Cache-Control",
-          "value": "no-cache, no-store, must-revalidate"
+          \"key\": \"Cache-Control\",
+          \"value\": \"no-cache, no-store, must-revalidate\"
         }
       ]
     }
   ]
 }
+"
