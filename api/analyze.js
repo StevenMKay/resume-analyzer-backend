@@ -805,23 +805,7 @@ function buildResumeDrivenStarStories(resumeText = "", jobDescription = "") {
     : STAR_TEMPLATE_LIBRARY.slice(0, 4);
 }
 
-  // Enhanced STAR Story Generation
-const jobThemes = deriveJobThemes(jobDescription);
-const targetCompany = extractCompanyFromJobDescription(jobDescription);
 
-// Use upgraded STAR builder instead of createStarStoryFromAchievement
-const enhancedStories = buildEnhancedStarStories(
-  achievements,
-  jobThemes,
-  targetCompany
-);
-
-// If enhanced stories exist, return them. Otherwise fallback to templates.
-return enhancedStories.length 
-  ? enhancedStories.slice(0, 4)
-  : STAR_TEMPLATE_LIBRARY.slice(0, 4);
-
-  }
 
   function deriveJobThemes(jobDescription = "") {
     if (!jobDescription) {
