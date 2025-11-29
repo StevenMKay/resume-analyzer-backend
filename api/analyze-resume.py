@@ -1,10 +1,10 @@
-from flask import Request, jsonify
 import os
 import json
 import openai
 import re
-import httpx
 from io import BytesIO
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs
 from PyPDF2 import PdfReader
 from docx import Document
 
@@ -45,7 +45,7 @@ def extract_company_name(text: str) -> str:
                 return company
     return None
 
-async def fetch_company_insights(company_name: str) -> dict:
+def fetch_company_insights(company_name: str) -> dict:
     if not company_name:
         return None
     try:
@@ -82,32 +82,34 @@ Format as JSON:
             response_format={"type": "json_object"}
         )
         return json.loads(response.choices[0].message.content)
-    except:
+    except Exception as e:
         company_slug = company_name.lower().replace(' ', '-')
         return {
             "company_name": company_name,
-            "insights": [f"Research {company_name} independently"],
+            "insights": [f"Research {company_name} independently for latest information"],
             "research_tips": [f"Check Glassdoor and LinkedIn for {company_name} reviews"],
             "sources": [
                 {"name": "Glassdoor", "url": f"https://www.glassdoor.com/Reviews/{company_slug}-Reviews-E.htm"},
-                {"name": "LinkedIn", "url": f"https://www.linkedin.com/company/{company_slug}/"}
-            ]
+                {"name": "LinkedIn", "url": f"https://www.linkedin.com/company/{company_slug}/"},
+                {"name": "Blind", "url": f"https://www.teamblind.com/company/{company_name}/"}
+            ],
+            "sources_note": "Please verify information independently"
         }
 
-async def analyze_with_ai(resume_text: str, job_description: str = None) -> dict:
+def analyze_with_ai(resume_text: str, job_description: str = None) -> dict:
     system_prompt = """You are an expert resume analyst. Analyze resumes and provide actionable feedback.
 
-Return JSON:
+Return JSON with this exact structure:
 {
   "overall_score": 75,
   "overall_summary": "Brief summary",
-  "sections": [{"name": "Experience", "status": "good", "feedback": "...", "improvements": []}],
-  "strengths": [],
-  "weaknesses": [],
-  "ats_analysis": {"score": 80, "feedback": "...", "issues": []},
+  "sections": [{"name": "Experience", "status": "good", "feedback": "...", "improvements": ["tip1", "tip2"]}],
+  "strengths": ["strength1", "strength2", "strength3"],
+  "weaknesses": ["weakness1", "weakness2", "weakness3"],
+  "ats_analysis": {"score": 80, "feedback": "...", "issues": ["issue1", "issue2"]},
   "star_stories": [{"question": "...", "situation": "...", "task": "...", "action": "...", "result": "...", "sample_answer": "..."}],
-  "missing_keywords": [],
-  "recommendations": []
+  "missing_keywords": ["keyword1", "keyword2"],
+  "recommendations": ["rec1", "rec2", "rec3"]
 }
 
 IMPORTANT: Provide MINIMUM 4 STAR stories."""
@@ -127,59 +129,100 @@ IMPORTANT: Provide MINIMUM 4 STAR stories."""
     )
     return json.loads(response.choices[0].message.content)
 
-def handler(request: Request):
-    # CORS headers
-    headers = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-    }
-    
-    if request.method == 'OPTIONS':
-        return ('', 204, headers)
-    
-    try:
-        # Get form data
-        resume_text = request.form.get('resume_text')
-        job_description = request.form.get('job_description')
+class handler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
         
-        # Check for file
-        resume_content = None
-        if 'file' in request.files:
-            file = request.files['file']
-            file_content = file.read()
-            filename = file.filename.lower()
+    def do_POST(self):
+        try:
+            # Parse multipart form data
+            content_type = self.headers.get('Content-Type', '')
             
-            if filename.endswith('.pdf'):
-                resume_content = extract_text_from_pdf(file_content)
-            elif filename.endswith('.docx'):
-                resume_content = extract_text_from_docx(file_content)
+            if 'multipart/form-data' not in content_type:
+                self.send_error(400, 'Expected multipart/form-data')
+                return
+                
+            # Get boundary
+            boundary = content_type.split('boundary=')[1].encode()
+            
+            # Read body
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            
+            # Parse form data
+            parts = body.split(b'--' + boundary)
+            
+            resume_text = None
+            job_description = None
+            resume_file_content = None
+            resume_filename = None
+            
+            for part in parts:
+                if b'Content-Disposition' in part:
+                    # Extract field name
+                    if b'name="resume_text"' in part:
+                        resume_text = part.split(b'\r\n\r\n')[1].split(b'\r\n')[0].decode('utf-8')
+                    elif b'name="job_description"' in part:
+                        job_description = part.split(b'\r\n\r\n')[1].split(b'\r\n')[0].decode('utf-8')
+                    elif b'name="file"' in part:
+                        # Extract filename
+                        filename_match = re.search(b'filename="([^"]+)"', part)
+                        if filename_match:
+                            resume_filename = filename_match.group(1).decode('utf-8')
+                            resume_file_content = part.split(b'\r\n\r\n')[1].rsplit(b'\r\n', 1)[0]
+            
+            # Extract resume content
+            resume_content = None
+            if resume_file_content:
+                filename = resume_filename.lower()
+                if filename.endswith('.pdf'):
+                    resume_content = extract_text_from_pdf(resume_file_content)
+                elif filename.endswith('.docx'):
+                    resume_content = extract_text_from_docx(resume_file_content)
+                else:
+                    self.send_error(400, 'Unsupported file format')
+                    return
+            elif resume_text:
+                resume_content = resume_text
             else:
-                return jsonify({'error': 'Unsupported file format'}), 400, headers
-        elif resume_text:
-            resume_content = resume_text
-        else:
-            return jsonify({'error': 'No resume provided'}), 400, headers
-        
-        if len(resume_content.strip()) < 100:
-            return jsonify({'error': 'Resume too short'}), 400, headers
-        
-        # Analyze resume
-        import asyncio
-        analysis = asyncio.run(analyze_with_ai(resume_content, job_description))
-        
-        # Get company insights
-        if job_description:
-            company_name = extract_company_name(job_description)
-            if company_name:
-                company_insights = asyncio.run(fetch_company_insights(company_name))
-                if company_insights:
-                    analysis['company_insights'] = company_insights
-        
-        return jsonify({
-            'success': True,
-            'analysis': analysis
-        }), 200, headers
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500, headers
+                self.send_error(400, 'No resume provided')
+                return
+            
+            if len(resume_content.strip()) < 100:
+                self.send_error(400, 'Resume too short')
+                return
+            
+            # Analyze resume
+            analysis = analyze_with_ai(resume_content, job_description)
+            
+            # Get company insights
+            if job_description:
+                company_name = extract_company_name(job_description)
+                if company_name:
+                    company_insights = fetch_company_insights(company_name)
+                    if company_insights:
+                        analysis['company_insights'] = company_insights
+            
+            # Send response
+            response_data = {
+                'success': True,
+                'analysis': analysis
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com')
+            self.end_headers()
+            self.wfile.write(json.dumps(response_data).encode())
+            
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com')
+            self.end_headers()
+            error_response = {'error': str(e)}
+            self.wfile.write(json.dumps(error_response).encode())
