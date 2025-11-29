@@ -850,7 +850,7 @@ function removeJobSpecificLanguage(text = '') {
     const base = role ? `While working as ${role},` : "In this role,";
     const contextHint = context ? ensureLowercaseStart(context) : "a critical business gap";
     const themePhrase = jobTheme ? ` tied to ${jobTheme}` : "";
-    const companyPhrase = company && company !== 'your team' ? ` that would translate to ${company}` : "";
+    const companyPhrase = company && company !== 'the hiring team' ? ` that would translate to ${company}` : "";
     return `${base} I recognized ${contextHint}${themePhrase}${companyPhrase}.`;
   }
 
@@ -878,16 +878,44 @@ function removeJobSpecificLanguage(text = '') {
   function buildQuestionFromAction(actionText = "", jobTheme = null, role = "", company = "") {
     const cleaned = (actionText || "").replace(/^I\s+/i, "").replace(/\.$/, "").trim();
     const roleContext = role ? ` in your ${role} role` : "";
-    const themeContext = jobTheme ? ` focused on ${jobTheme}` : "";
-    const companyContext = company && company !== 'your team' ? ` that would resonate at ${company}` : "";
+    const companyContext = company && company !== 'the hiring team' ? ` for ${company}` : "";
+    const themedQuestion = buildThemeQuestion(jobTheme, companyContext || roleContext);
+    if (themedQuestion) {
+      return themedQuestion;
+    }
     if (!cleaned) {
-      return `Tell me about a time you drove measurable change${themeContext || roleContext}${companyContext}.`;
+      return `Tell me about a time you drove measurable change${companyContext || roleContext}.`;
     }
     const verbMatch = cleaned.match(/^[a-z]+/i);
     const verb = verbMatch ? verbMatch[0].toLowerCase() : "led";
     const remainder = cleaned.slice(verbMatch ? verbMatch[0].length : 0).trim() || "a critical initiative";
-    const baseQuestion = `Tell me about a time you ${verb} ${remainder}${roleContext}${themeContext}${companyContext}`.replace(/\s+/g, " ").trim();
+    const baseQuestion = `Tell me about a time you ${verb} ${remainder}${companyContext || roleContext}`.replace(/\s+/g, " ").trim();
     return baseQuestion.endsWith("?") ? baseQuestion : `${baseQuestion}?`;
+  }
+
+  function buildThemeQuestion(jobTheme, contextSuffix = "") {
+    if (!jobTheme) {
+      return null;
+    }
+    const suffix = contextSuffix ? ` ${contextSuffix.trim()}` : '';
+    switch (jobTheme) {
+      case 'risk mitigation':
+        return `Tell me about a time you strengthened risk controls${suffix}.`;
+      case 'revenue impact':
+        return `Tell me about a time you drove revenue growth or cost savings${suffix}.`;
+      case 'automation initiatives':
+        return `Tell me about a time you automated a manual workflow${suffix}.`;
+      case 'program launches':
+        return `Tell me about a time you launched a complex program end-to-end${suffix}.`;
+      case 'talent enablement':
+        return `Tell me about a time you trained or enabled a large team${suffix}.`;
+      case 'customer experience':
+        return `Tell me about a time you improved customer or employee experience${suffix}.`;
+      case 'data-driven decisions':
+        return `Tell me about a time you used data insights to drive decisions${suffix}.`;
+      default:
+        return null;
+    }
   }
 
   function buildStructuredSampleAnswer(parts = {}) {
@@ -907,7 +935,7 @@ function removeJobSpecificLanguage(text = '') {
       segments.push(`Result: ${resultText}`);
     }
     if (parts.jobTheme || parts.targetCompany) {
-      const companyText = parts.targetCompany && parts.targetCompany !== 'your team'
+      const companyText = parts.targetCompany && parts.targetCompany !== 'the hiring team'
         ? `${parts.targetCompany}`
         : 'the target role';
       const themeText = parts.jobTheme || 'similar initiatives';
@@ -1013,16 +1041,72 @@ function removeJobSpecificLanguage(text = '') {
     return `I blend ${focusArea} to keep initiatives on track. This resume currently scores ${score}/100, and I'm targeting ${company} so we can ${highlight}`;
   }
 
+  const COMPANY_STOPWORDS = new Set([
+    'about','responsibilities','requirements','role','team','manager','director','hybrid','remote','summary','benefits','overview','description','department','skills','preferred','qualifications','experience','location','salary','compensation'
+  ]);
+
+  const KNOWN_COMPANY_NAMES = [
+    'Amazon','Apple','Google','Alphabet','Microsoft','Meta','Facebook','Netflix','Salesforce','Oracle','Adobe','IBM','Accenture','Deloitte','PwC','KPMG','EY','McKinsey & Company','McKinsey','Boston Consulting Group','BCG','Bain & Company','Bain','JPMorgan Chase','Chase','Wells Fargo','Bank of America','Citigroup','Citi','Capital One','Goldman Sachs','Morgan Stanley','Stripe','Square','Block','Shopify','ServiceNow','Snowflake','Palantir','Uber','Lyft','Airbnb'
+  ];
+
   function extractCompanyFromJobDescription(jobDescription = "") {
     if (!jobDescription) {
-      return "your team";
+      return "the hiring team";
     }
-    const atMatch = jobDescription.match(/at\s+([A-Z][\w&-]+)/i);
-    if (atMatch) {
-      return atMatch[1];
+    const company = detectCompanyName(jobDescription);
+    return company || "the hiring team";
+  }
+
+  function detectCompanyName(text = "") {
+    if (!text) {
+      return "";
     }
-    const properMatch = jobDescription.match(/\b([A-Z][A-Za-z0-9&-]{2,})\b/);
-    return properMatch ? properMatch[1] : "your team";
+    const normalized = text.replace(/\s+/g, " ").trim();
+    for (const name of KNOWN_COMPANY_NAMES) {
+      const regex = new RegExp(`\\b${escapeRegex(name)}\\b`, 'i');
+      if (regex.test(normalized)) {
+        return name;
+      }
+    }
+
+    const multiWordRegex = /\b([A-Z][A-Za-z&-]*(?:\s+[A-Z][A-Za-z&-]*)+)\b/g;
+    const multiWordCandidate = findCompanyCandidate(normalized, multiWordRegex);
+    if (multiWordCandidate) {
+      return multiWordCandidate;
+    }
+
+    const singleWordRegex = /\b([A-Z][A-Za-z&-]{3,})\b/g;
+    const singleWordCandidate = findCompanyCandidate(normalized, singleWordRegex);
+    return singleWordCandidate || "";
+  }
+
+  function findCompanyCandidate(text, regex) {
+    if (!text || !regex) {
+      return "";
+    }
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      const candidate = match[1].trim();
+      if (isCompanyCandidate(candidate)) {
+        return candidate;
+      }
+    }
+    return "";
+  }
+
+  function isCompanyCandidate(phrase = "") {
+    if (!phrase) {
+      return false;
+    }
+    const tokens = phrase.split(/\s+/).map(token => token.toLowerCase());
+    const hasStopword = tokens.some(token => COMPANY_STOPWORDS.has(token));
+    if (hasStopword) {
+      return false;
+    }
+    if (/^(lead|senior|business|program|project|product|operations?)$/i.test(tokens[0])) {
+      return false;
+    }
+    return true;
   }
 
   const INDUSTRY_PATTERNS = [
