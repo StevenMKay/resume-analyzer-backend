@@ -189,7 +189,7 @@ export default async function handler(req, res) {
     const completenessAdjusted = enforceResumeCompleteness(normalized, normalizedResume, resumeStructure);
     const validated = applyPositiveSignalBoost(completenessAdjusted, normalizedResume, resumeStructure);
 
-    const atsSignals = createAtsSignals(normalizedResume, normalizedJobDescription, resumeStructure);
+    const atsSignals = createAtsSignals(normalizedResume, normalizedJobDescription, resumeStructure, validated.criticalKeywords);
     validated.atsSignals = atsSignals;
     validated.atsWarnings = buildAtsWarnings(atsSignals);
     validated.structureSignals = resumeStructure;
@@ -640,9 +640,10 @@ function buildEnhancedStarStories(rawAchievements = [], jobThemes = [], targetCo
 
   const stories = [];
   preparedAchievements.slice(0, 6).forEach((achievement, index) => {
-    const theme = normalizedThemes.length
-      ? normalizedThemes[index % normalizedThemes.length]
-      : inferThemeFromAchievementText(achievement.text) || 'impact';
+    const inferredTheme = inferThemeFromAchievementText(achievement.text);
+    const theme = inferredTheme
+      || (normalizedThemes.length ? normalizedThemes[index % normalizedThemes.length] : null)
+      || 'impact';
 
     const starObject = createStarStoryFromAchievement(achievement, theme, targetCompany);
     if (starObject) {
@@ -678,18 +679,25 @@ function inferThemeFromAchievementText(text = '') {
   }
 
   const THEME_HINTS = [
-    { regex: /(risk|control|compliance|audit)/i, label: 'risk mitigation' },
-    { regex: /(revenue|sales|profit|cost savings|pipeline)/i, label: 'revenue impact' },
-    { regex: /(automation|digital|ai|machine learning|robotic|workflow)/i, label: 'automation initiatives' },
-    { regex: /(launch|rollout|implementation|deployment|go-live)/i, label: 'program launches' },
-    { regex: /(training|enablement|coaching|curriculum|academy)/i, label: 'talent enablement' },
-    { regex: /(customer|client|member|employee experience|nps)/i, label: 'customer experience' },
-    { regex: /(data|analytics|insight|dashboard|kpi|reporting)/i, label: 'data-driven decisions' },
-    { regex: /(process|workflow|efficiency|improvement|lean|six sigma)/i, label: 'process improvement' }
+    { regex: /(revenue|sales|profit|cost savings|pipeline|margin|roi)/i, label: 'revenue impact', weight: 3 },
+    { regex: /(risk|control|compliance|audit|regulator)/i, label: 'risk mitigation', weight: 2.2 },
+    { regex: /(automation|digital|ai|machine learning|robotic|workflow|rpa)/i, label: 'automation initiatives', weight: 2 },
+    { regex: /(launch|rollout|implementation|deployment|go-live|migration)/i, label: 'program launches', weight: 1.7 },
+    { regex: /(training|enablement|coaching|curriculum|academy|upskilling)/i, label: 'talent enablement', weight: 1.5 },
+    { regex: /(customer|client|member|employee experience|nps|csat)/i, label: 'customer experience', weight: 1.4 },
+    { regex: /(data|analytics|insight|dashboard|kpi|reporting|measure)/i, label: 'data-driven decisions', weight: 1.6 },
+    { regex: /(process|workflow|efficiency|improvement|lean|six sigma|kaizen|optimization)/i, label: 'process improvement', weight: 1.6 }
   ];
 
-  const match = THEME_HINTS.find(({ regex }) => regex.test(text));
-  return match ? match.label : null;
+  let bestMatch = null;
+  let bestScore = 0;
+  THEME_HINTS.forEach(({ regex, label, weight }) => {
+    if (regex.test(text) && weight > bestScore) {
+      bestMatch = label;
+      bestScore = weight;
+    }
+  });
+  return bestMatch;
 }
 
 function createStoryBuilderPayload(analysis, resumeText, jobDescription) {
@@ -1898,7 +1906,7 @@ ${jobDescription}
 """`;
 }
 
-function createAtsSignals(resumeText, jobDescription, structureSignals = null) {
+function createAtsSignals(resumeText, jobDescription, structureSignals = null, criticalKeywords = []) {
   const rawResume = typeof resumeText === 'string' ? resumeText : '';
   const rawJob = typeof jobDescription === 'string' ? jobDescription : '';
   const safeResume = rawResume.toLowerCase();
@@ -1916,7 +1924,31 @@ function createAtsSignals(resumeText, jobDescription, structureSignals = null) {
     hasJobDescription,
     structure: structureSignals || deriveResumeStructureSignals(rawResume)
   };
+  const criticalHitRate = calculateKeywordHitRate(criticalKeywords, safeResume);
+  signals.criticalKeywordHitRate = criticalHitRate;
+  signals.keywordOverlap = Math.max(signals.keywordOverlap, criticalHitRate || 0);
   return signals;
+}
+
+function calculateKeywordHitRate(keywords = [], resumeText = '') {
+  if (!Array.isArray(keywords) || !keywords.length || !resumeText) {
+    return 0;
+  }
+  const normalized = resumeText.toLowerCase();
+  let hits = 0;
+  keywords.forEach(keyword => {
+    if (typeof keyword !== 'string') {
+      return;
+    }
+    const phrase = keyword.trim().toLowerCase();
+    if (!phrase) {
+      return;
+    }
+    if (normalized.includes(phrase)) {
+      hits += 1;
+    }
+  });
+  return hits ? hits / keywords.length : 0;
 }
 
 function buildAtsWarnings(signals) {
@@ -1924,7 +1956,7 @@ function buildAtsWarnings(signals) {
   if (signals.tablesDetected) warnings.push('Tables detected—ATS may skip table content.');
   if (signals.imagesDetected) warnings.push('Images/logos offer no text for ATS. Replace with plain text.');
   if (signals.columnsDetected) warnings.push('Multi-column layouts can scramble reading order.');
-  if (signals.hasJobDescription && signals.keywordOverlap < 0.3) {
+  if (signals.hasJobDescription && (signals.keywordOverlap || 0) < 0.3) {
     warnings.push('Fewer than 30% of job keywords echoed in resume.');
   }
   if (signals.metricsCount < 3) warnings.push('Add more quantified achievements (numbers or KPIs).');
@@ -1951,7 +1983,9 @@ function generateAtsInsightCard(signals) {
   const hasJob = Boolean(signals.hasJobDescription);
   const detailParts = [];
   if (hasJob) {
-    detailParts.push(`Keyword overlap ${(signals.keywordOverlap * 100).toFixed(0)}%`);
+    const overlap = ((signals.keywordOverlap || 0) * 100).toFixed(0);
+    const hitRate = ((signals.criticalKeywordHitRate || 0) * 100).toFixed(0);
+    detailParts.push(`Keyword overlap ${overlap}% (critical hits ${hitRate}%)`);
   }
   detailParts.push(`metrics ${signals.metricsCount}`);
   detailParts.push(`bullets ${signals.bulletSymbols}`);
@@ -2350,6 +2384,16 @@ function deriveResumeStructureSignals(text = '') {
       }
     });
   }
+
+  CORE_RESUME_SECTIONS.forEach(section => {
+    if (headingsSet.has(section)) {
+      return;
+    }
+    const directPattern = new RegExp(`\\b${escapeRegex(section)}\\b`, 'i');
+    if (directPattern.test(structureFriendly)) {
+      headingsSet.add(section);
+    }
+  });
 
   const bulletLinePattern = new RegExp(`^[-–—*${BULLET_GLYPH_SOURCE}]`);
   const bulletLinesFromStarts = lines.filter(line => bulletLinePattern.test(line)).length;
