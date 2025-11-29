@@ -2156,7 +2156,13 @@ function resolveLinkedInJobUrls(rawUrl = '') {
   };
 
   const pathname = parsed.pathname || '';
-  const jobId = extractJobId();
+  let jobId = extractJobId();
+  if (!jobId) {
+    const pathMatch = pathname.match(/\/jobs\/view\/(\d+)/);
+    if (pathMatch) {
+      jobId = pathMatch[1];
+    }
+  }
 
   if (pathname.includes('/jobs/collections/') && jobId) {
     const canonicalJobUrl = `https://www.linkedin.com/jobs/view/${jobId}`;
@@ -2168,8 +2174,12 @@ function resolveLinkedInJobUrls(rawUrl = '') {
     return { primaryUrl: canonicalJobUrl, fallbackUrl: trimmed };
   }
 
-  if (pathname.startsWith('/jobs/view/') && !pathname.endsWith('/')) {
-    return { primaryUrl: `${parsed.origin}${pathname}/`, fallbackUrl: trimmed };
+  if (pathname.startsWith('/jobs/view/')) {
+    const canonicalJobUrl = jobId
+      ? `https://www.linkedin.com/jobs/view/${jobId}/`
+      : `${parsed.origin}${pathname.replace(/\/+$/, '')}/`;
+    const fallback = canonicalJobUrl === trimmed ? null : trimmed;
+    return { primaryUrl: canonicalJobUrl, fallbackUrl: fallback };
   }
 
   return defaults;
