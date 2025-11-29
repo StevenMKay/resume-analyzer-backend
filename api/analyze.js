@@ -1006,11 +1006,11 @@ function createStarStoryFromAchievement(achievement, jobTheme = null, targetComp
   }
 
   function buildSituationSentence(role = "", context = "", jobTheme = null, company = "") {
-    const base = role ? `While working as ${role},` : "In this role,";
+    const roleSummary = summarizeRoleHeading(role);
+    const base = roleSummary ? `While serving as ${roleSummary},` : "In this role,";
     const contextHint = context ? ensureLowercaseStart(context) : "a critical business gap";
     const themePhrase = jobTheme ? ` tied to ${jobTheme}` : "";
-    const companyPhrase = company && company !== 'the hiring team' ? ` that would translate to ${company}` : "";
-    return `${base} I recognized ${contextHint}${themePhrase}${companyPhrase}.`;
+    return `${base} I recognized ${contextHint}${themePhrase}.`;
   }
 
   function ensureLowercaseStart(text = "") {
@@ -1035,43 +1035,44 @@ function createStarStoryFromAchievement(achievement, jobTheme = null, targetComp
   }
 
   function buildQuestionFromAction(actionText = "", jobTheme = null, role = "", company = "") {
-    const cleaned = (actionText || "").replace(/^I\s+/i, "").replace(/\.$/, "").trim();
-    const roleContext = role ? ` in your ${role} role` : "";
-    const companyContext = company && company !== 'the hiring team' ? ` for ${company}` : "";
-    const themedQuestion = buildThemeQuestion(jobTheme, companyContext || roleContext);
+    const themedQuestion = buildThemeQuestion(jobTheme);
     if (themedQuestion) {
       return themedQuestion;
     }
+
+    const cleaned = (actionText || "").replace(/^I\s+/i, "").replace(/\.$/, "").trim();
     if (!cleaned) {
-      return `Tell me about a time you drove measurable change${companyContext || roleContext}.`;
+      return 'Tell me about a time you drove measurable change.';
     }
+
+    const roleTitle = summarizeRoleTitle(role);
+    const roleSuffix = roleTitle ? ` in your ${roleTitle}` : '';
     const verbMatch = cleaned.match(/^[a-z]+/i);
-    const verb = verbMatch ? verbMatch[0].toLowerCase() : "led";
-    const remainder = cleaned.slice(verbMatch ? verbMatch[0].length : 0).trim() || "a critical initiative";
-    const baseQuestion = `Tell me about a time you ${verb} ${remainder}${companyContext || roleContext}`.replace(/\s+/g, " ").trim();
-    return baseQuestion.endsWith("?") ? baseQuestion : `${baseQuestion}?`;
+    const verb = verbMatch ? verbMatch[0].toLowerCase() : 'led';
+    const remainder = cleaned.slice(verbMatch ? verbMatch[0].length : 0).trim() || 'a critical initiative';
+    const baseQuestion = `Tell me about a time you ${verb} ${remainder}${roleSuffix}`.replace(/\s+/g, ' ').trim();
+    return baseQuestion.endsWith('?') ? baseQuestion : `${baseQuestion}?`;
   }
 
-  function buildThemeQuestion(jobTheme, contextSuffix = "") {
+  function buildThemeQuestion(jobTheme) {
     if (!jobTheme) {
       return null;
     }
-    const suffix = contextSuffix ? ` ${contextSuffix.trim()}` : '';
     switch (jobTheme) {
       case 'risk mitigation':
-        return `Tell me about a time you strengthened risk controls${suffix}.`;
+        return 'Tell me about a time you strengthened risk controls?';
       case 'revenue impact':
-        return `Tell me about a time you drove revenue growth or cost savings${suffix}.`;
+        return 'Tell me about a time you drove revenue growth or cost savings?';
       case 'automation initiatives':
-        return `Tell me about a time you automated a manual workflow${suffix}.`;
+        return 'Tell me about a time you automated a manual workflow?';
       case 'program launches':
-        return `Tell me about a time you launched a complex program end-to-end${suffix}.`;
+        return 'Tell me about a time you launched a complex program end-to-end?';
       case 'talent enablement':
-        return `Tell me about a time you trained or enabled a large team${suffix}.`;
+        return 'Tell me about a time you trained or enabled a large team?';
       case 'customer experience':
-        return `Tell me about a time you improved customer or employee experience${suffix}.`;
+        return 'Tell me about a time you improved customer or employee experience?';
       case 'data-driven decisions':
-        return `Tell me about a time you used data insights to drive decisions${suffix}.`;
+        return 'Tell me about a time you used data insights to drive decisions?';
       default:
         return null;
     }
@@ -1093,14 +1094,72 @@ function createStarStoryFromAchievement(achievement, jobTheme = null, targetComp
       const resultText = parts.result.startsWith("Delivered") ? parts.result : `As a result, ${parts.result}`;
       segments.push(`Result: ${resultText}`);
     }
-    if (parts.jobTheme || parts.targetCompany) {
-      const companyText = parts.targetCompany && parts.targetCompany !== 'the hiring team'
-        ? `${parts.targetCompany}`
-        : 'the target role';
+    if (parts.jobTheme) {
       const themeText = parts.jobTheme || 'similar initiatives';
-      segments.push(`Tie-back: This directly supports ${companyText}'s focus on ${themeText}.`);
+      segments.push(`Tie-back: This illustrates how I advance ${themeText} priorities in future roles.`);
     }
     return segments.join(' ');
+  }
+
+  function summarizeRoleHeading(role = '') {
+    if (!role || typeof role !== 'string') {
+      return '';
+    }
+    const normalized = role.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return '';
+    }
+    const segments = normalized.split('|').map(seg => seg.trim()).filter(Boolean);
+    const title = segments[0] || normalized;
+    const company = detectCompanyInRoleText(normalized, segments.slice(1));
+    if (company) {
+      return `${title} at ${company}`;
+    }
+    return title;
+  }
+
+  function summarizeRoleTitle(role = '') {
+    if (!role || typeof role !== 'string') {
+      return '';
+    }
+    const normalized = role.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return '';
+    }
+    const firstSegment = normalized.split('|')[0] || '';
+    return firstSegment.trim();
+  }
+
+  function detectCompanyInRoleSegments(segments = []) {
+    if (!Array.isArray(segments)) {
+      return '';
+    }
+    const COMPANY_KEYWORD_REGEX = /(bank|financial|finance|services|solutions|company|corp|corporation|group|partners|holdings|technologies|technology|systems|consulting|analytics|university|college|academy)/i;
+    for (const segment of segments) {
+      const cleaned = (segment || '').replace(/\d{2,4}/g, '').replace(/\b(present|current)\b/ig, '').trim();
+      if (!cleaned || /\d/.test(cleaned)) {
+        continue;
+      }
+      if (COMPANY_KEYWORD_REGEX.test(cleaned)) {
+        return cleaned;
+      }
+    }
+    return '';
+  }
+
+  function detectCompanyInRoleText(text = '', extraSegments = []) {
+    if (!text) {
+      return '';
+    }
+    const explicitMatch = text.match(/(JPMorgan Chase|Chase Bank|Chase|Wells Fargo|Bank of America|Capital One|Citibank|Citigroup|US Bank|PNC|Goldman Sachs|Morgan Stanley|American Express)/i);
+    if (explicitMatch) {
+      return explicitMatch[0].trim();
+    }
+    const segmentMatch = detectCompanyInRoleSegments(extraSegments);
+    if (segmentMatch) {
+      return segmentMatch;
+    }
+    return '';
   }
 
   function toSentenceCase(text = "") {
