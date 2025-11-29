@@ -735,11 +735,14 @@ function removeJobSpecificLanguage(text = '') {
     if (!resumeText) {
       return [];
     }
+    const normalized = normalizeResumeContent(resumeText);
+    const bulletRegex = createBulletRegex('g');
+    const primedText = normalized.replace(bulletRegex, match => `\n${match}`);
     const achievements = [];
     const bulletPattern = new RegExp(
       `^(?:[-*${escapeForRegex(BULLET_GLYPH_SOURCE)}]|\\d+\.)\\s*(.+)`
     );
-    const lines = resumeText.split(/\r?\n/);
+    const lines = primedText.split(/\r?\n/);
     let currentRole = "";
 
     lines.forEach(line => {
