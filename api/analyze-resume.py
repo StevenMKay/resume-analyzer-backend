@@ -97,22 +97,24 @@ Format as JSON:
         }
 
 def analyze_with_ai(resume_text: str, job_description: str = None) -> dict:
-    system_prompt = """You are an expert resume analyst. Analyze resumes and provide actionable feedback.
+        system_prompt = """You are an expert resume analyst. Analyze resumes and provide actionable feedback.
 
 Return JSON with this exact structure:
 {
-  "overall_score": 75,
-  "overall_summary": "Brief summary",
-  "sections": [{"name": "Experience", "status": "good", "feedback": "...", "improvements": ["tip1", "tip2"]}],
-  "strengths": ["strength1", "strength2", "strength3"],
-  "weaknesses": ["weakness1", "weakness2", "weakness3"],
-  "ats_analysis": {"score": 80, "feedback": "...", "issues": ["issue1", "issue2"]},
-  "star_stories": [{"question": "...", "situation": "...", "task": "...", "action": "...", "result": "...", "sample_answer": "..."}],
-  "missing_keywords": ["keyword1", "keyword2"],
-  "recommendations": ["rec1", "rec2", "rec3"]
+    "overall_score": 75,
+    "overall_summary": "Brief summary",
+    "sections": [{"name": "Experience", "status": "good", "feedback": "...", "improvements": ["tip1", "tip2"]}],
+    "strengths": ["strength1", "strength2", "strength3"],
+    "weaknesses": ["weakness1", "weakness2", "weakness3"],
+    "ats_analysis": {"score": 80, "feedback": "...", "issues": ["issue1", "issue2"]},
+    "star_stories": [{"question": "...", "situation": "...", "task": "...", "action": "...", "result": "...", "sample_answer": "..."}],
+    "missing_keywords": ["keyword1", "keyword2"],
+    "recommendations": ["rec1", "rec2", "rec3"],
+    "detected_company_name": "Company name inferred from job description or empty string if not found"
 }
 
-IMPORTANT: Provide MINIMUM 4 STAR stories."""
+IMPORTANT: Provide MINIMUM 4 STAR stories.
+If a job description is provided, carefully read it and set detected_company_name."""
 
     user_prompt = f"Resume:\n{resume_text}\n"
     if job_description:
@@ -202,6 +204,10 @@ class handler(BaseHTTPRequestHandler):
             # Get company insights
             if job_description:
                 company_name = extract_company_name(job_description)
+                fallback_company = analysis.get('detected_company_name') if isinstance(analysis, dict) else None
+                if not company_name and fallback_company:
+                    company_name = fallback_company.strip()
+                    print(f"[CompanyInsights] Using AI-detected company name: {company_name or 'NONE'}")
                 print(f"[CompanyInsights] Extracted company name: {company_name or 'NONE'}")
                 if company_name:
                     company_insights = fetch_company_insights(company_name)
