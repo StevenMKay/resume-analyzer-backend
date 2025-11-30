@@ -10,6 +10,7 @@ from docx import Document
 # Initialize OpenAI
 openai.api_key = os.environ.get('OPENAI_API_KEY')
 
+
 def extract_text_from_pdf(file_content: bytes) -> str:
     try:
         pdf_reader = PdfReader(BytesIO(file_content))
@@ -31,25 +32,17 @@ def extract_text_from_docx(file_content: bytes) -> str:
 def extract_company_name(text: str) -> str:
     if not text:
         return None
-    
-    # FIXED: More flexible patterns that search the entire text, not just the start
     patterns = [
-        r"([A-Z][A-Za-z0-9\s&.]{2,40}?)\s+(?:is|are)\s+(?:seeking|hiring|looking for|recruiting)",
-        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.]{2,40}?)(?:\s+is|\s+we|\s+our|,|\s+-)",
-        r"([A-Z][A-Z\s&.]{2,40})\s+logo",
-        r"(?:Company|Organization|Employer):\s*([A-Z][A-Za-z0-9\s&.]{2,40})",
+        r"^([A-Z][A-Za-z0-9\s&.]+?)\s+(?:is|seeks|seeking|looking for)",
+        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.]+?)(?:\s+is|\s+we|\s+our|,)",
+        r"([A-Z][A-Za-z0-9\s&.]+?)\s+-\s+[A-Z]",
     ]
-    
     for pattern in patterns:
-        match = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
+        match = re.search(pattern, text, re.MULTILINE)
         if match:
             company = match.group(1).strip()
-            # Filter out common false positives
-            excluded = ['We', 'Our', 'The', 'This', 'About', 'Join', 'At', 'Skip', 'Search', 
-                       'Main', 'Home', 'Network', 'Jobs', 'Messaging', 'Notifications']
-            if company not in excluded and len(company) > 2:
+            if company not in ['We', 'Our', 'The', 'This', 'About', 'Join', 'At']:
                 return company
-    
     return None
 
 def fetch_company_insights(company_name: str) -> dict:
@@ -78,7 +71,7 @@ Format as JSON:
   ],
   "sources_note": "Brief note about data recency"
 }}"""
-
+        
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -124,7 +117,7 @@ IMPORTANT: Provide MINIMUM 4 STAR stories."""
     user_prompt = f"Resume:\n{resume_text}\n"
     if job_description:
         user_prompt += f"\nJob Description:\n{job_description}"
-
+    
     response = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -143,31 +136,31 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-
+        
     def do_POST(self):
         try:
             # Parse multipart form data
             content_type = self.headers.get('Content-Type', '')
-
+            
             if 'multipart/form-data' not in content_type:
                 self.send_error(400, 'Expected multipart/form-data')
                 return
-
+                
             # Get boundary
             boundary = content_type.split('boundary=')[1].encode()
-
+            
             # Read body
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length)
-
+            
             # Parse form data
             parts = body.split(b'--' + boundary)
-
+            
             resume_text = None
             job_description = None
             resume_file_content = None
             resume_filename = None
-
+            
             for part in parts:
                 if b'Content-Disposition' in part:
                     # Extract field name
@@ -181,7 +174,7 @@ class handler(BaseHTTPRequestHandler):
                         if filename_match:
                             resume_filename = filename_match.group(1).decode('utf-8')
                             resume_file_content = part.split(b'\r\n\r\n')[1].rsplit(b'\r\n', 1)[0]
-
+            
             # Extract resume content
             resume_content = None
             if resume_file_content:
@@ -198,14 +191,14 @@ class handler(BaseHTTPRequestHandler):
             else:
                 self.send_error(400, 'No resume provided')
                 return
-
+            
             if len(resume_content.strip()) < 100:
                 self.send_error(400, 'Resume too short')
                 return
-
+            
             # Analyze resume
             analysis = analyze_with_ai(resume_content, job_description)
-
+            
             # Get company insights
             if job_description:
                 company_name = extract_company_name(job_description)
@@ -213,19 +206,19 @@ class handler(BaseHTTPRequestHandler):
                     company_insights = fetch_company_insights(company_name)
                     if company_insights:
                         analysis['company_insights'] = company_insights
-
+            
             # Send response
             response_data = {
                 'success': True,
                 'analysis': analysis
             }
-
+            
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com')
             self.end_headers()
             self.wfile.write(json.dumps(response_data).encode())
-
+            
         except Exception as e:
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
