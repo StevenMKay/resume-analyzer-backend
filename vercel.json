@@ -1,11 +1,12 @@
 {
   "functions": {
-    "api/analyze-resume.py": {
+    "api/analyze.js": {
       "maxDuration": 30
     },
-    "api/explain-formula.py": {
-      "maxDuration": 45
+    "api/analyze-resume.py": {
+      "maxDuration": 30
     }
+  },
      "builds": [
     {
       "src": "api/analyze.js",
