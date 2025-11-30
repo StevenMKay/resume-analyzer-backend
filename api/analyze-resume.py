@@ -45,6 +45,32 @@ def extract_company_name(text: str) -> str:
                 return company
     return None
 
+def detect_company_name_with_ai(job_description: str) -> str:
+    if not job_description:
+        return None
+    try:
+        prompt = f"""Identify the exact company name mentioned in this job description. If none is found, return an empty string.
+
+Job Description:
+{job_description}
+
+Return JSON like {{"company_name": "Name"}}."""
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You extract company names from job descriptions."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0,
+            response_format={"type": "json_object"}
+        )
+        data = json.loads(response.choices[0].message.content)
+        company = data.get('company_name', '').strip()
+        return company or None
+    except Exception as e:
+        print(f"[CompanyInsights] AI company detection failed: {str(e)}")
+        return None
+
 def fetch_company_insights(company_name: str) -> dict:
     if not company_name:
         return None
@@ -204,10 +230,9 @@ class handler(BaseHTTPRequestHandler):
             # Get company insights
             if job_description:
                 company_name = extract_company_name(job_description)
-                fallback_company = analysis.get('detected_company_name') if isinstance(analysis, dict) else None
-                if not company_name and fallback_company:
-                    company_name = fallback_company.strip()
-                    print(f"[CompanyInsights] Using AI-detected company name: {company_name or 'NONE'}")
+                if not company_name:
+                    company_name = detect_company_name_with_ai(job_description)
+                    print(f"[CompanyInsights] AI fallback company name: {company_name or 'NONE'}")
                 print(f"[CompanyInsights] Extracted company name: {company_name or 'NONE'}")
                 if company_name:
                     company_insights = fetch_company_insights(company_name)
