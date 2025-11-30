@@ -33,16 +33,23 @@ def extract_company_name(text: str) -> str:
     if not text:
         return None
     patterns = [
-        r"^([A-Z][A-Za-z0-9\s&.]+?)\s+(?:is|seeks|seeking|looking for)",
-        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.]+?)(?:\s+is|\s+we|\s+our|,)",
-        r"([A-Z][A-Za-z0-9\s&.]+?)\s+-\s+[A-Z]",
+        r"^\s*([A-Z][A-Za-z0-9\s&.'-]+?)\s+(?:is|seeks|seeking|looking for|invites|needs)",
+        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.'-]+?)(?:\s+is|\s+we|\s+our|,)",
+        r"^\s*([A-Z][A-Za-z0-9\s&.'-]+?)\s+-\s+[A-Z]",
     ]
+    disallowed = {'We', 'Our', 'The', 'This', 'About', 'Join', 'At', 'Role', 'Team', 'Company', 'Organization'}
     for pattern in patterns:
         match = re.search(pattern, text, re.MULTILINE)
         if match:
             company = match.group(1).strip()
-            if company not in ['We', 'Our', 'The', 'This', 'About', 'Join', 'At']:
+            if company not in disallowed and not company.startswith('This '):
                 return company
+    # Fallback: look for "Company Name - Job Title" within same line
+    fallback_match = re.search(r"([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,3})\s+role", text)
+    if fallback_match:
+        candidate = fallback_match.group(1).strip()
+        if candidate not in disallowed:
+            return candidate
     return None
 
 def fetch_company_insights(company_name: str) -> dict:
