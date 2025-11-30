@@ -202,10 +202,14 @@ class handler(BaseHTTPRequestHandler):
             # Get company insights
             if job_description:
                 company_name = extract_company_name(job_description)
+                print(f"[CompanyInsights] Extracted company name: {company_name or 'NONE'}")
                 if company_name:
                     company_insights = fetch_company_insights(company_name)
+                    print(f"[CompanyInsights] Insights fetched: {bool(company_insights)}")
                     if company_insights:
                         analysis['company_insights'] = company_insights
+                else:
+                    print('[CompanyInsights] No company detected in job description, skipping insights')
             
             # Send response
             response_data = {
