@@ -2,6 +2,9 @@
   "functions": {
     "api/analyze-resume.py": {
       "maxDuration": 30
+    },
+    "api/explain-formula.py": {
+      "maxDuration": 15
     }
   },
   "headers": [
