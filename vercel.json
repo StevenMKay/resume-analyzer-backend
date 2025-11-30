@@ -1,13 +1,10 @@
 {
-  "builds": [
-    {
-      "src": "api/analyze-resume.py",
-      "use": "@vercel/python"
-    }
-  ],
   "functions": {
     "api/analyze-resume.py": {
       "maxDuration": 30
+    },
+    "api/explain-formula.py": {
+      "maxDuration": 45
     }
   },
   "headers": [
@@ -25,6 +22,10 @@
         {
           "key": "Access-Control-Allow-Headers",
           "value": "Content-Type"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
         }
       ]
     }
