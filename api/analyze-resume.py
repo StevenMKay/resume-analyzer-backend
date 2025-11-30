@@ -10,6 +10,7 @@ from docx import Document
 # Initialize OpenAI
 openai.api_key = os.environ.get('OPENAI_API_KEY')
 
+
 def extract_text_from_pdf(file_content: bytes) -> str:
     try:
         pdf_reader = PdfReader(BytesIO(file_content))
