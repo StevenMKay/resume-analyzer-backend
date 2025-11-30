@@ -4,7 +4,7 @@
       "maxDuration": 30
     },
     "api/explain-formula.py": {
-      "maxDuration": 30
+      "maxDuration": 45
     }
   },
   "headers": [
