@@ -45,32 +45,6 @@ def extract_company_name(text: str) -> str:
                 return company
     return None
 
-def detect_company_name_with_ai(job_description: str) -> str:
-    if not job_description:
-        return None
-    try:
-        prompt = f"""Identify the exact company name mentioned in this job description. If none is found, return an empty string.
-
-Job Description:
-{job_description}
-
-Return JSON like {{"company_name": "Name"}}."""
-        response = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You extract company names from job descriptions."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0,
-            response_format={"type": "json_object"}
-        )
-        data = json.loads(response.choices[0].message.content)
-        company = data.get('company_name', '').strip()
-        return company or None
-    except Exception as e:
-        print(f"[CompanyInsights] AI company detection failed: {str(e)}")
-        return None
-
 def fetch_company_insights(company_name: str) -> dict:
     if not company_name:
         return None
@@ -140,7 +114,7 @@ Return JSON with this exact structure:
 }
 
 IMPORTANT: Provide MINIMUM 4 STAR stories.
-If a job description is provided, carefully read it and set detected_company_name."""
+If a job description is provided, carefully read ONLY that text (ignore the resume) when setting detected_company_name, and return an empty string if no company is mentioned."""
 
     user_prompt = f"Resume:\n{resume_text}\n"
     if job_description:
@@ -230,9 +204,11 @@ class handler(BaseHTTPRequestHandler):
             # Get company insights
             if job_description:
                 company_name = extract_company_name(job_description)
-                if not company_name:
-                    company_name = detect_company_name_with_ai(job_description)
-                    print(f"[CompanyInsights] AI fallback company name: {company_name or 'NONE'}")
+                if not company_name and isinstance(analysis, dict):
+                    fallback_company = (analysis.get('detected_company_name') or '').strip()
+                    if fallback_company:
+                        company_name = fallback_company
+                        print(f"[CompanyInsights] Using analyzer-detected company name from job description: {company_name}")
                 print(f"[CompanyInsights] Extracted company name: {company_name or 'NONE'}")
                 if company_name:
                     company_insights = fetch_company_insights(company_name)
