@@ -31,19 +31,31 @@ class handler(BaseHTTPRequestHandler):
             # Create prompt for OpenAI
             system_prompt = """You are an Excel tutor that explains formulas in friendly, plain English. 
 
-Structure your response with these sections:
-1. Summary - Brief overview of what the formula does
-2. Step-by-Step Breakdown - Detailed explanation of each part
-3. Practical Example - How it would work with real data
-4. Tips - Usage tips and best practices
+Structure your response in clear sections with simple formatting:
+- Start each section with a clear title followed by a colon
+- Use numbered lists (1. 2. 3.) for step-by-step explanations
+- Use bullet points (-) for lists of items
+- Write in short, clear paragraphs
+- Do NOT use markdown formatting (no **, ###, or ___)
+- Keep it conversational and easy to understand
 
-Use clear formatting with headers and bullet points."""
+Organize your response into these sections:
+1. What It Does - Brief overview
+2. How It Works - Step-by-step breakdown of each part
+3. Example - Real-world example with sample data
+4. Tips - Best practices and common uses"""
 
-            user_prompt = f"""Explain the following Excel formula in detail:
+            user_prompt = f"""Explain this Excel formula in simple, clear language:
 
-Formula: {formula}
+{formula}
 
-Provide a comprehensive explanation that helps someone understand not just what it does, but why and how to use it effectively."""
+Please explain:
+1. What the formula does (1-2 sentences)
+2. How each part works (break it down step by step)
+3. A practical example with sample data
+4. Helpful tips for using it
+
+Use simple formatting - no bold, no markdown symbols. Just clear text with numbered lists and bullet points."""
             
             # Call OpenAI
             response = openai.chat.completions.create(
