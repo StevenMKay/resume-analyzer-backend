@@ -1,4 +1,14 @@
 {
+  "builds": [
+    {
+      "src": "api/analyze-resume.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "api/explain-formula.py",
+      "use": "@vercel/python"
+    }
+  ],
   "functions": {
     "api/analyze-resume.py": {
       "maxDuration": 30
