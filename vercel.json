@@ -1,23 +1,22 @@
 {
   "functions": {
-    "api/analyze.js": {
+    "api/analyze-resume.py": {
       "maxDuration": 30
     },
-    "api/analyze-resume.py": {
+    "api/explain-formula.py": {
       "maxDuration": 30
     }
   },
-     "builds": [
-    {
-      "src": "api/analyze.js",
-      "use": "@vercel/node"
-    },
+  "builds": [
     {
       "src": "api/analyze-resume.py",
       "use": "@vercel/python"
+    },
+    {
+      "src": "api/explain-formula.py",
+      "use": "@vercel/python"
     }
   ],
-  },
   "headers": [
     {
       "source": "/api/(.*)",
