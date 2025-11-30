@@ -97,7 +97,7 @@ Format as JSON:
         }
 
 def analyze_with_ai(resume_text: str, job_description: str = None) -> dict:
-        system_prompt = """You are an expert resume analyst. Analyze resumes and provide actionable feedback.
+    system_prompt = """You are an expert resume analyst. Analyze resumes and provide actionable feedback.
 
 Return JSON with this exact structure:
 {
