@@ -6,6 +6,16 @@
     "api/explain-formula.py": {
       "maxDuration": 45
     }
+     "builds": [
+    {
+      "src": "api/analyze.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/analyze-resume.py",
+      "use": "@vercel/python"
+    }
+  ],
   },
   "headers": [
     {
