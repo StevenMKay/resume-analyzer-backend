@@ -7,9 +7,9 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs
 from PyPDF2 import PdfReader
 from docx import Document
+
 # Initialize OpenAI
 openai.api_key = os.environ.get('OPENAI_API_KEY')
-
 
 def extract_text_from_pdf(file_content: bytes) -> str:
     try:
@@ -33,23 +33,16 @@ def extract_company_name(text: str) -> str:
     if not text:
         return None
     patterns = [
-        r"^\s*([A-Z][A-Za-z0-9\s&.'-]+?)\s+(?:is|seeks|seeking|looking for|invites|needs)",
-        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.'-]+?)(?:\s+is|\s+we|\s+our|,)",
-        r"^\s*([A-Z][A-Za-z0-9\s&.'-]+?)\s+-\s+[A-Z]",
+        r"^([A-Z][A-Za-z0-9\s&.]+?)\s+(?:is|seeks|seeking|looking for)",
+        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.]+?)(?:\s+is|\s+we|\s+our|,)",
+        r"([A-Z][A-Za-z0-9\s&.]+?)\s+-\s+[A-Z]",
     ]
-    disallowed = {'We', 'Our', 'The', 'This', 'About', 'Join', 'At', 'Role', 'Team', 'Company', 'Organization'}
     for pattern in patterns:
         match = re.search(pattern, text, re.MULTILINE)
         if match:
             company = match.group(1).strip()
-            if company not in disallowed and not company.startswith('This '):
+            if company not in ['We', 'Our', 'The', 'This', 'About', 'Join', 'At']:
                 return company
-    # Fallback: look for "Company Name - Job Title" within same line
-    fallback_match = re.search(r"([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,3})\s+role", text)
-    if fallback_match:
-        candidate = fallback_match.group(1).strip()
-        if candidate not in disallowed:
-            return candidate
     return None
 
 def fetch_company_insights(company_name: str) -> dict:
@@ -108,20 +101,18 @@ def analyze_with_ai(resume_text: str, job_description: str = None) -> dict:
 
 Return JSON with this exact structure:
 {
-    "overall_score": 75,
-    "overall_summary": "Brief summary",
-    "sections": [{"name": "Experience", "status": "good", "feedback": "...", "improvements": ["tip1", "tip2"]}],
-    "strengths": ["strength1", "strength2", "strength3"],
-    "weaknesses": ["weakness1", "weakness2", "weakness3"],
-    "ats_analysis": {"score": 80, "feedback": "...", "issues": ["issue1", "issue2"]},
-    "star_stories": [{"question": "...", "situation": "...", "task": "...", "action": "...", "result": "...", "sample_answer": "..."}],
-    "missing_keywords": ["keyword1", "keyword2"],
-    "recommendations": ["rec1", "rec2", "rec3"],
-    "detected_company_name": "Company name inferred from job description or empty string if not found"
+  "overall_score": 75,
+  "overall_summary": "Brief summary",
+  "sections": [{"name": "Experience", "status": "good", "feedback": "...", "improvements": ["tip1", "tip2"]}],
+  "strengths": ["strength1", "strength2", "strength3"],
+  "weaknesses": ["weakness1", "weakness2", "weakness3"],
+  "ats_analysis": {"score": 80, "feedback": "...", "issues": ["issue1", "issue2"]},
+  "star_stories": [{"question": "...", "situation": "...", "task": "...", "action": "...", "result": "...", "sample_answer": "..."}],
+  "missing_keywords": ["keyword1", "keyword2"],
+  "recommendations": ["rec1", "rec2", "rec3"]
 }
 
-IMPORTANT: Provide MINIMUM 4 STAR stories.
-If a job description is provided, carefully read ONLY that text (ignore the resume) when setting detected_company_name, and return an empty string if no company is mentioned."""
+IMPORTANT: Provide MINIMUM 4 STAR stories."""
 
     user_prompt = f"Resume:\n{resume_text}\n"
     if job_description:
@@ -211,19 +202,10 @@ class handler(BaseHTTPRequestHandler):
             # Get company insights
             if job_description:
                 company_name = extract_company_name(job_description)
-                if not company_name and isinstance(analysis, dict):
-                    fallback_company = (analysis.get('detected_company_name') or '').strip()
-                    if fallback_company:
-                        company_name = fallback_company
-                        print(f"[CompanyInsights] Using analyzer-detected company name from job description: {company_name}")
-                print(f"[CompanyInsights] Extracted company name: {company_name or 'NONE'}")
                 if company_name:
                     company_insights = fetch_company_insights(company_name)
-                    print(f"[CompanyInsights] Insights fetched: {bool(company_insights)}")
                     if company_insights:
                         analysis['company_insights'] = company_insights
-                else:
-                    print('[CompanyInsights] No company detected in job description, skipping insights')
             
             # Send response
             response_data = {
