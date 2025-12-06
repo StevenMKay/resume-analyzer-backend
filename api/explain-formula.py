@@ -1,108 +1,152 @@
 import os
 import json
-import openai
+from openai import OpenAI
 from http.server import BaseHTTPRequestHandler
 
-# Initialize OpenAI
-openai.api_key = os.environ.get('OPENAI_API_KEY')
+# Initialize OpenAI client
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# Allowed frontend origins
+ALLOWED_ORIGINS = {
+    "https://www.careersolutionsfortoday.com",
+    "https://careersolutionsfortoday.com",
+    "https://stevenmkay.github.io",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500"
+}
+
+def set_cors_headers(handler, origin):
+    """Attach proper CORS headers."""
+    if origin in ALLOWED_ORIGINS:
+        handler.send_header("Access-Control-Allow-Origin", origin)
+    else:
+        # Safe fallback
+        handler.send_header("Access-Control-Allow-Origin", "https://www.careersolutionsfortoday.com")
+
+    handler.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+
+def safe_json(response):
+    """Safely parse JSON without crashing on invalid responses."""
+    try:
+        return response.json()
+    except Exception:
+        return None
+
 
 class handler(BaseHTTPRequestHandler):
+
     def do_OPTIONS(self):
+        origin = self.headers.get("Origin")
         self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com')
-        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        set_cors_headers(self, origin)
         self.end_headers()
 
     def do_POST(self):
+        origin = self.headers.get("Origin")
+
         try:
-            # Read request body
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(content_length)
-            data = json.loads(body.decode('utf-8'))
+            # --- Read client request ---
+            content_length = int(self.headers.get("Content-Length", 0))
+            raw_body = self.rfile.read(content_length).decode("utf-8")
 
-            # Get formula
-            formula = data.get('formula', '').strip()
+            try:
+                data = json.loads(raw_body)
+            except json.JSONDecodeError:
+                return self.respond_json(400, origin, {
+                    "success": False,
+                    "error": "Invalid JSON in request body."
+                })
 
+            formula = data.get("formula", "").strip()
+
+            # --- Validation ---
             if not formula or len(formula) < 3:
-                self.send_error(400, 'A valid formula is required')
-                return
+                return self.respond_json(400, origin, {
+                    "success": False,
+                    "error": "A valid Excel formula is required."
+                })
 
-            # Create prompt for OpenAI
-            system_prompt = """You are an Excel tutor that explains formulas in friendly, plain English.
+            if len(formula) > 2000:
+                return self.respond_json(400, origin, {
+                    "success": False,
+                    "error": "Formula is too long to analyze."
+                })
 
-Structure your response in clear sections with proper indentation for readability:
-- Start each section with a clear title followed by a colon
-- Use numbered lists (1. 2. 3.) for main points
-- Use indented sub-bullets (   - ) with 3 spaces for details under numbered items
-- Use regular bullet points (-) for standalone lists
-- Write in short, clear paragraphs
-- Do NOT use markdown formatting (no **, ###, or ___)
-- Keep it conversational and easy to understand
+            # Ensure formula starts with "=" but don't double-add
+            if not formula.startswith("="):
+                formula = "=" + formula
 
-IMPORTANT FORMATTING:
-When explaining steps under numbered items, indent sub-bullets like this:
-1. First main point
-   - Sub-detail about first point
-   - Another sub-detail
-2. Second main point
-   - Sub-detail about second point
+            # --- Build prompts ---
+            system_prompt = (
+                "You are an Excel tutor that explains formulas in friendly, plain English.\n"
+                "Format output using:\n"
+                "- Section titles followed by a colon\n"
+                "- Numbered main points (1. 2. 3.)\n"
+                "- Indented sub-points using exactly 3 leading spaces + '-'\n"
+                "- No markdown formatting, no bold, no special symbols\n\n"
+                "Indented example:\n"
+                "1. First step\n"
+                "   - Sub explanation\n"
+                "   - More detail\n"
+            )
 
-Organize your response into these sections:
-1. What It Does - Brief overview
-2. How It Works - Step-by-step breakdown of each part (use indented sub-bullets for each component)
-3. Example - Real-world example with sample data (use indented sub-bullets for steps)
-4. Tips - Best practices and common uses (use indented sub-bullets for each tip detail)"""
+            user_prompt = (
+                f"Explain this Excel formula:\n\n{formula}\n\n"
+                "Provide the following sections:\n"
+                "1. What It Does\n"
+                "2. How It Works (use indented sub-bullets)\n"
+                "3. Example with sample data (indented sub-bullets)\n"
+                "4. Tips (indented sub-bullets)\n\n"
+                "NO markdown. Use only plain text with clean indentation."
+            )
 
-            user_prompt = f"""Explain this Excel formula in simple, clear language:
-
-{formula}
-
-Please explain:
-1. What the formula does (1-2 sentences)
-2. How each part works (break it down step by step with indented sub-bullets)
-3. A practical example with sample data (show steps with indented sub-bullets)
-4. Helpful tips for using it (use indented sub-bullets for details)
-
-Use simple formatting with proper indentation - no bold, no markdown symbols. Just clear text with numbered lists and indented sub-bullets (   - with 3 spaces)."""
-
-            # Call OpenAI
-            response = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
+            # --- NEW RESPONSES API CALL ---
+            openai_response = client.responses.create(
+                model="gpt-4.1-mini",
+                input=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.3,
-                max_tokens=1000
+                max_output_tokens=1000
             )
 
-            explanation = response.choices[0].message.content.strip()
+            # Extract text safely
+            try:
+                explanation = (
+                    openai_response.output[0]
+                    .content[0]
+                    .text
+                    .strip()
+                )
+            except Exception:
+                return self.respond_json(502, origin, {
+                    "success": False,
+                    "error": "OpenAI returned an unexpected response format."
+                })
 
-            # Send response
-            response_data = {
-                'success': True,
-                'explanation': explanation
-            }
-
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com')
-            self.end_headers()
-            self.wfile.write(json.dumps(response_data).encode())
-
-        except json.JSONDecodeError:
-            self.send_response(400)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com')
-            self.end_headers()
-            error_response = {'success': False, 'error': 'Invalid JSON'}
-            self.wfile.write(json.dumps(error_response).encode())
+            # --- Return successful response ---
+            return self.respond_json(200, origin, {
+                "success": True,
+                "explanation": explanation
+            })
 
         except Exception as e:
-            self.send_response(500)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', 'https://www.careersolutionsfortoday.com')
-            self.end_headers()
-            error_response = {'success': False, 'error': str(e)}
-            self.wfile.write(json.dumps(error_response).encode())
+            # Your server logs receive the real error
+            print("SERVER ERROR:", str(e))
+
+            # The client receives a safe message
+            return self.respond_json(500, origin, {
+                "success": False,
+                "error": "Internal server error. Please try again later."
+            })
+
+    def respond_json(self, status, origin, payload):
+        """Utility for sending JSON responses with proper CORS."""
+        self.send_response(status)
+        set_cors_headers(self, origin)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload).encode())
