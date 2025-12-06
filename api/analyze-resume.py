@@ -7,9 +7,9 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs
 from PyPDF2 import PdfReader
 from docx import Document
-
 # Initialize OpenAI
 openai.api_key = os.environ.get('OPENAI_API_KEY')
+
 
 def extract_text_from_pdf(file_content: bytes) -> str:
     try:
@@ -33,16 +33,41 @@ def extract_company_name(text: str) -> str:
     if not text:
         return None
     patterns = [
-        r"^([A-Z][A-Za-z0-9\s&.]+?)\s+(?:is|seeks|seeking|looking for)",
-        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.]+?)(?:\s+is|\s+we|\s+our|,)",
-        r"([A-Z][A-Za-z0-9\s&.]+?)\s+-\s+[A-Z]",
+        r"^\s*([A-Z][A-Za-z0-9\s&.'-]+?)\s+(?:is|seeks|seeking|looking for|invites|needs)",
+        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.'-]+?)(?:\s+is|\s+we|\s+our|,)",
+        r"^\s*([A-Z][A-Za-z0-9\s&.'-]+?)\s+-\s+[A-Z]",
     ]
+    disallowed = {'We', 'Our', 'The', 'This', 'About', 'Join', 'At', 'Role', 'Team', 'Company', 'Organization'}
     for pattern in patterns:
         match = re.search(pattern, text, re.MULTILINE)
         if match:
             company = match.group(1).strip()
-            if company not in ['We', 'Our', 'The', 'This', 'About', 'Join', 'At']:
+            if company not in disallowed and not company.startswith('This '):
                 return company
+    # Fallback: look for "Company Name - Job Title" within same line
+    fallback_match = re.search(r"([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,3})\s+role", text)
+    if fallback_match:
+        candidate = fallback_match.group(1).strip()
+        if candidate not in disallowed:
+            return candidate
+    return None
+
+def extract_role_title(text: str) -> str:
+    if not text:
+        return None
+    patterns = [
+        (r"is\s+seeking\s+(?:an?|the)?\s*([A-Za-z0-9/&().'\-\s]+)", re.IGNORECASE),
+        (r"role:\s*([A-Z][A-Za-z0-9/&().'\-\s]+)", re.IGNORECASE),
+        (r"About\s+This\s+Role\s*\n\s*([A-Z][A-Za-z0-9/&().'\-\s]+)", re.IGNORECASE),
+        (r"We\s+are\s+looking\s+for\s+(?:an?|the)?\s*([A-Za-z0-9/&().'\-\s]+)", re.IGNORECASE)
+    ]
+    for pattern, flags in patterns:
+        match = re.search(pattern, text, flags)
+        if match:
+            role = match.group(1).strip()
+            role = re.split(r"[\n\r]", role)[0].strip(' .:-')
+            if role and len(role.split()) <= 8:
+                return role
     return None
 
 def fetch_company_insights(company_name: str) -> dict:
@@ -96,23 +121,60 @@ Format as JSON:
             "sources_note": "Please verify information independently"
         }
 
+def fetch_salary_and_industry_insights(company_name: str, role_title: str) -> dict:
+    if not role_title:
+        return None
+    try:
+        target_company = company_name or "comparable employers"
+        prompt = f"""Using reliable 2024-2025 compensation and labor-market data, estimate the salary range and industry outlook for the role '{role_title}' at {target_company}.
+
+Format the answer as JSON:
+{{
+  "company_name": "{target_company}",
+  "role_title": "{role_title}",
+  "salary_range": {{"currency": "USD", "period": "annual", "low": 0, "mid": 0, "high": 0}},
+  "salary_commentary": "Context on how the range was derived",
+  "industry_growth_trends": ["Trend 1", "Trend 2"],
+  "demand_outlook": "Summary of job-market demand and growth outlook",
+  "sources": [{{"name": "Source", "url": "https://..."}}]
+}}
+
+Only provide numbers you are confident in and cite relevant public sources (Glassdoor, Levels.fyi, US BLS, etc.)."""
+
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a compensation analyst. Provide factual salary ranges and cite sources."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.35,
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        print(f"[SalaryInsights] Failed to fetch salary data: {str(e)}")
+        return None
+
 def analyze_with_ai(resume_text: str, job_description: str = None) -> dict:
     system_prompt = """You are an expert resume analyst. Analyze resumes and provide actionable feedback.
 
 Return JSON with this exact structure:
 {
-  "overall_score": 75,
-  "overall_summary": "Brief summary",
-  "sections": [{"name": "Experience", "status": "good", "feedback": "...", "improvements": ["tip1", "tip2"]}],
-  "strengths": ["strength1", "strength2", "strength3"],
-  "weaknesses": ["weakness1", "weakness2", "weakness3"],
-  "ats_analysis": {"score": 80, "feedback": "...", "issues": ["issue1", "issue2"]},
-  "star_stories": [{"question": "...", "situation": "...", "task": "...", "action": "...", "result": "...", "sample_answer": "..."}],
-  "missing_keywords": ["keyword1", "keyword2"],
-  "recommendations": ["rec1", "rec2", "rec3"]
+    "overall_score": 75,
+    "overall_summary": "Brief summary",
+    "sections": [{"name": "Experience", "status": "good", "feedback": "...", "improvements": ["tip1", "tip2"]}],
+    "strengths": ["strength1", "strength2", "strength3"],
+    "weaknesses": ["weakness1", "weakness2", "weakness3"],
+    "ats_analysis": {"score": 80, "feedback": "...", "issues": ["issue1", "issue2"]},
+    "star_stories": [{"question": "...", "situation": "...", "task": "...", "action": "...", "result": "...", "sample_answer": "..."}],
+    "missing_keywords": ["keyword1", "keyword2"],
+    "recommendations": ["rec1", "rec2", "rec3"],
+    "detected_company_name": "Company name inferred solely from the job description text (empty string if not found)",
+    "detected_role_title": "Specific role title inferred solely from the job description text (empty string if not found)"
 }
 
-IMPORTANT: Provide MINIMUM 4 STAR stories."""
+IMPORTANT: Provide MINIMUM 4 STAR stories.
+If a job description is provided, carefully read ONLY that text (ignore the resume) when setting detected_company_name and detected_role_title, returning an empty string when either item cannot be found."""
 
     user_prompt = f"Resume:\n{resume_text}\n"
     if job_description:
@@ -165,9 +227,11 @@ class handler(BaseHTTPRequestHandler):
                 if b'Content-Disposition' in part:
                     # Extract field name
                     if b'name="resume_text"' in part:
-                        resume_text = part.split(b'\r\n\r\n')[1].split(b'\r\n')[0].decode('utf-8')
+                        value_bytes = part.split(b'\r\n\r\n', 1)[1].rsplit(b'\r\n', 1)[0]
+                        resume_text = value_bytes.decode('utf-8')
                     elif b'name="job_description"' in part:
-                        job_description = part.split(b'\r\n\r\n')[1].split(b'\r\n')[0].decode('utf-8')
+                        value_bytes = part.split(b'\r\n\r\n', 1)[1].rsplit(b'\r\n', 1)[0]
+                        job_description = value_bytes.decode('utf-8')
                     elif b'name="file"' in part:
                         # Extract filename
                         filename_match = re.search(b'filename="([^"]+)"', part)
@@ -199,13 +263,40 @@ class handler(BaseHTTPRequestHandler):
             # Analyze resume
             analysis = analyze_with_ai(resume_content, job_description)
             
-            # Get company insights
+            company_name = None
+            role_title = None
+
             if job_description:
                 company_name = extract_company_name(job_description)
+                role_title = extract_role_title(job_description)
+
+            if isinstance(analysis, dict):
+                if (not company_name) and analysis.get('detected_company_name'):
+                    fallback_company = (analysis.get('detected_company_name') or '').strip()
+                    if fallback_company:
+                        company_name = fallback_company
+                        print(f"[CompanyInsights] Using analyzer-detected company name from job description: {company_name}")
+                if (not role_title) and analysis.get('detected_role_title'):
+                    fallback_role = (analysis.get('detected_role_title') or '').strip()
+                    if fallback_role:
+                        role_title = fallback_role
+                        print(f"[SalaryInsights] Using analyzer-detected role title from job description: {role_title}")
+
+            if job_description:
+                print(f"[CompanyInsights] Extracted company name: {company_name or 'NONE'}")
                 if company_name:
                     company_insights = fetch_company_insights(company_name)
-                    if company_insights:
+                    print(f"[CompanyInsights] Insights fetched: {bool(company_insights)}")
+                    if company_insights and isinstance(analysis, dict):
                         analysis['company_insights'] = company_insights
+                else:
+                    print('[CompanyInsights] No company detected in job description, skipping insights')
+
+                print(f"[SalaryInsights] Role title detected: {role_title or 'NONE'}")
+                salary_insights = fetch_salary_and_industry_insights(company_name, role_title)
+                print(f"[SalaryInsights] Insights fetched: {bool(salary_insights)}")
+                if salary_insights and isinstance(analysis, dict):
+                    analysis['salary_and_industry_insights'] = salary_insights
             
             # Send response
             response_data = {
