@@ -4,7 +4,6 @@ import re
 from io import BytesIO
 from http.server import BaseHTTPRequestHandler
 
-from urllib.parse import parse_qs  # still available if you later need it
 from PyPDF2 import PdfReader
 from docx import Document
 from openai import OpenAI
@@ -61,78 +60,94 @@ def extract_text_from_docx(file_content: bytes) -> str:
 
 # ---------- Helpers: Company / Role Extraction ----------
 
-def extract_company_name(text: str) -> str | None:
+def extract_company_name(text: str):
     if not text:
         return None
 
-    patterns = [
-        r"^\s*([A-Z][A-Za-z0-9\s&.'-]+?)\s+(?:is|seeks|seeking|looking for|invites|needs)",
-        r"(?:at|join|About)\s+([A-Z][A-Za-z0-9\s&.'-]+?)(?:\s+is|\s+we|\s+our|,)",
-        r"^\s*([A-Z][A-Za-z0-9\s&.'-]+?)\s+-\s+[A-Z]",
-    ]
-    disallowed = {
-        "We",
-        "Our",
-        "The",
-        "This",
-        "About",
-        "Join",
-        "At",
-        "Role",
-        "Team",
-        "Company",
-        "Organization",
-    }
+    # Avoid common non-company headers
+    cleaned = text.replace("About the job", "").replace("About This Role", "")
 
-    for pattern in patterns:
-        match = re.search(pattern, text, re.MULTILINE)
-        if match:
-            company = match.group(1).strip()
-            if company not in disallowed and not company.startswith("This "):
-                return company
-
-    # Fallback: look for "Company Name role"
-    fallback_match = re.search(
-        r"([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,3})\s+role", text
+    # Pattern 1: "Wells Fargo is seeking..."
+    m = re.search(
+        r"\b([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+)*)\s+(?:is|seeks|is seeking|is hiring)\b",
+        cleaned
     )
-    if fallback_match:
-        candidate = fallback_match.group(1).strip()
-        if candidate not in disallowed:
+    if m:
+        company = m.group(1).strip()
+        if 1 <= len(company.split()) <= 5:
+            return company
+
+    # Pattern 2: "at Wells Fargo"
+    m = re.search(
+        r"\bat\s+([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+)*)\b",
+        cleaned
+    )
+    if m:
+        company = m.group(1).strip()
+        if 1 <= len(company.split()) <= 5:
+            return company
+
+    # Pattern 3: "Wells Fargo - Lead Business Execution Consultant"
+    m = re.search(
+        r"\b([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+)*)\s+-\s+[A-Z]",
+        cleaned
+    )
+    if m:
+        company = m.group(1).strip()
+        if 1 <= len(company.split()) <= 5:
+            return company
+
+    return None
+
+def extract_role_title(text: str):
+    if not text:
+        return None
+
+    # Most reliable: "is seeking Lead Business Execution Consultant"
+    m = re.search(
+        r"is\s+seeking\s+(?:an?\s+)?([A-Z][A-Za-z0-9/&().'\-\s]+)",
+        text,
+        re.IGNORECASE
+    )
+    if m:
+        role = m.group(1).strip()
+        role = role.split("\n")[0].strip(" .:-")
+        if 1 <= len(role.split()) <= 10:
+            return role
+
+    # "We are looking for a Lead Business Execution Consultant"
+    m = re.search(
+        r"we\s+are\s+looking\s+for\s+(?:an?\s+)?([A-Z][A-Za-z0-9/&().'\-\s]+)",
+        text,
+        re.IGNORECASE
+    )
+    if m:
+        role = m.group(1).strip()
+        role = role.split("\n")[0].strip(" .:-")
+        if 1 <= len(role.split()) <= 10:
+            return role
+
+    # Last-resort: headline-like capitalized phrase (filtering obvious nonsense)
+    m = re.search(
+        r"\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z/]+){1,6})\b",
+        text
+    )
+    if m:
+        candidate = m.group(1).strip()
+        if not candidate.lower().startswith(("about", "required", "desired", "benefits", "posting", "job")):
             return candidate
 
     return None
 
-def extract_role_title(text: str) -> str | None:
-    if not text:
-        return None
 
-    patterns = [
-        (r"is\s+seeking\s+(?:an?|the)?\s*([A-Za-z0-9/&().'\-\s]+)", re.IGNORECASE),
-        (r"role:\s*([A-Z][A-Za-z0-9/&().'\-\s]+)", re.IGNORECASE),
-        (r"About\s+This\s+Role\s*\n\s*([A-Z][A-Za-z0-9/&().'\-\s]+)", re.IGNORECASE),
-        (r"We\s+are\s+looking\s+for\s+(?:an?|the)?\s*([A-Za-z0-9/&().'\-\s]+)", re.IGNORECASE),
-    ]
-
-    for pattern, flags in patterns:
-        match = re.search(pattern, text, flags)
-        if match:
-            role = match.group(1).strip()
-            # Only keep first line and trim cruft
-            role = re.split(r"[\n\r]", role)[0].strip(" .:-")
-            if role and len(role.split()) <= 8:
-                return role
-
-    return None
-
-
-# ---------- Helpers: OpenAI Calls (Responses API) ----------
+# ---------- Helpers: OpenAI Calls ----------
 
 def ensure_openai_client():
     if client is None:
         raise RuntimeError("OpenAI API key is not configured on the server.")
 
 
-def fetch_company_insights(company_name: str) -> dict | None:
+def fetch_company_insights(company_name: str):
     if not company_name:
         return None
 
@@ -165,9 +180,9 @@ Format as JSON:
   "sources_note": "Brief note about data recency"
 }}"""
 
-        resp = client.responses.create(
+        resp = client.chat.completions.create(
             model="gpt-4.1-mini",
-            input=[
+            messages=[
                 {
                     "role": "system",
                     "content": "You are a company research assistant. Provide specific, factual information."
@@ -175,14 +190,13 @@ Format as JSON:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_output_tokens=800,
+            max_tokens=800,
             response_format={"type": "json_object"},
         )
 
-        content = resp.output[0].content[0].text
+        content = resp.choices[0].message.content
         return json.loads(content)
     except Exception as e:
-        # Fallback if OpenAI fails – still provide helpful links
         print(f"[CompanyInsights] Failed to fetch insights: {e}")
         company_slug = company_name.lower().replace(" ", "-")
         return {
@@ -209,7 +223,7 @@ Format as JSON:
         }
 
 
-def fetch_salary_and_industry_insights(company_name: str | None, role_title: str | None) -> dict | None:
+def fetch_salary_and_industry_insights(company_name: str, role_title: str):
     if not role_title:
         return None
 
@@ -232,9 +246,9 @@ Format the answer as JSON:
 
 Only provide numbers you are confident in and cite relevant public sources (Glassdoor, Levels.fyi, US BLS, etc.)."""
 
-        resp = client.responses.create(
+        resp = client.chat.completions.create(
             model="gpt-4.1-mini",
-            input=[
+            messages=[
                 {
                     "role": "system",
                     "content": "You are a compensation analyst. Provide factual salary ranges and cite sources."
@@ -242,18 +256,18 @@ Only provide numbers you are confident in and cite relevant public sources (Glas
                 {"role": "user", "content": prompt},
             ],
             temperature=0.35,
-            max_output_tokens=900,
+            max_tokens=900,
             response_format={"type": "json_object"},
         )
 
-        content = resp.output[0].content[0].text
+        content = resp.choices[0].message.content
         return json.loads(content)
     except Exception as e:
         print(f"[SalaryInsights] Failed to fetch salary data: {e}")
         return None
 
 
-def analyze_with_ai(resume_text: str, job_description: str | None = None) -> dict:
+def analyze_with_ai(resume_text: str, job_description: str = None) -> dict:
     ensure_openai_client()
 
     system_prompt = """You are an expert resume analyst. Analyze resumes and provide actionable feedback.
@@ -280,18 +294,18 @@ If a job description is provided, carefully read ONLY that text (ignore the resu
     if job_description:
         user_prompt += f"\nJob Description:\n{job_description}"
 
-    resp = client.responses.create(
+    resp = client.chat.completions.create(
         model="gpt-4.1-mini",
-        input=[
+        messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.3,
-        max_output_tokens=1800,
+        max_tokens=1800,
         response_format={"type": "json_object"},
     )
 
-    content = resp.output[0].content[0].text
+    content = resp.choices[0].message.content
     return json.loads(content)
 
 
@@ -326,10 +340,7 @@ class handler(BaseHTTPRequestHandler):
                 return self._respond_json(
                     400,
                     origin,
-                    {
-                        "success": False,
-                        "error": "Expected multipart/form-data",
-                    },
+                    {"success": False, "error": "Expected multipart/form-data"},
                 )
 
             boundary_token = "boundary="
@@ -360,24 +371,17 @@ class handler(BaseHTTPRequestHandler):
                 if not part or part == b"--":
                     continue
 
-                # Separate headers and content within this part
                 if b"\r\n\r\n" not in part:
                     continue
 
                 header_block, file_data = part.split(b"\r\n\r\n", 1)
-                file_data = file_data.rsplit(b"\r\n", 1)[0]  # strip final CRLF
+                file_data = file_data.rsplit(b"\r\n", 1)[0]
 
-                # Process form fields
-                if b'Content-Disposition' in header_block:
-                    # Resume text field
+                if b"Content-Disposition" in header_block:
                     if b'name="resume_text"' in header_block:
                         resume_text = file_data.decode("utf-8", errors="ignore").strip()
-
-                    # Job description field
                     elif b'name="job_description"' in header_block:
                         job_description = file_data.decode("utf-8", errors="ignore").strip()
-
-                    # File field
                     elif b'name="file"' in header_block:
                         filename_match = re.search(b'filename="([^"]+)"', header_block)
                         if filename_match:
@@ -407,10 +411,7 @@ class handler(BaseHTTPRequestHandler):
                 return self._respond_json(
                     400,
                     origin,
-                    {
-                        "success": False,
-                        "error": "No resume provided (file or text).",
-                    },
+                    {"success": False, "error": "No resume provided (file or text)."},
                 )
 
             resume_content = (resume_content or "").strip()
@@ -429,8 +430,8 @@ class handler(BaseHTTPRequestHandler):
                     400,
                     origin,
                     {
-                        "success": False,
-                        "error": "Resume is too long to analyze in one request. Please trim or summarize.",
+                            "success": False,
+                            "error": "Resume is too long to analyze in one request. Please trim or summarize.",
                     },
                 )
 
@@ -449,7 +450,6 @@ class handler(BaseHTTPRequestHandler):
                 company_name = extract_company_name(job_description)
                 role_title = extract_role_title(job_description)
 
-            # Use AI-detected company & role as fallback
             if isinstance(analysis, dict):
                 if not company_name and analysis.get("detected_company_name"):
                     fallback_company = (analysis.get("detected_company_name") or "").strip()
@@ -463,7 +463,7 @@ class handler(BaseHTTPRequestHandler):
                         role_title = fallback_role
                         print(f"[SalaryInsights] Using analyzer-detected role title: {role_title}")
 
-            # Optional: Company insights
+            # Company insights (optional)
             if job_description and company_name:
                 print(f"[CompanyInsights] Extracted company name: {company_name}")
                 company_insights = fetch_company_insights(company_name)
@@ -473,7 +473,7 @@ class handler(BaseHTTPRequestHandler):
             elif job_description:
                 print("[CompanyInsights] No company detected in job description, skipping company insights")
 
-            # Optional: Salary and industry insights
+            # Salary & industry insights (optional)
             if job_description:
                 print(f"[SalaryInsights] Role title detected: {role_title or 'NONE'}")
                 salary_insights = fetch_salary_and_industry_insights(company_name, role_title)
@@ -481,7 +481,6 @@ class handler(BaseHTTPRequestHandler):
                 if salary_insights and isinstance(analysis, dict):
                     analysis["salary_and_industry_insights"] = salary_insights
 
-            # Success response
             response_data = {
                 "success": True,
                 "analysis": analysis,
@@ -489,7 +488,6 @@ class handler(BaseHTTPRequestHandler):
             return self._respond_json(200, origin, response_data)
 
         except Exception as e:
-            # Log full error on server, but send a generic message to client
             print("[ResumeAnalyzer] Internal server error:", repr(e))
             return self._respond_json(
                 500,
@@ -500,7 +498,7 @@ class handler(BaseHTTPRequestHandler):
                 },
             )
 
-    def _respond_json(self, status_code: int, origin: str | None, payload: dict):
+    def _respond_json(self, status_code: int, origin: str, payload: dict):
         self.send_response(status_code)
         set_cors_headers(self, origin)
         self.send_header("Content-Type", "application/json")
