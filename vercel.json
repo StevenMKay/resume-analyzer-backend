@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/analyze-resume.py": {
-      "maxDuration": 45
+      "maxDuration": 60
     },
     "api/explain-formula.py": {
       "maxDuration": 45
