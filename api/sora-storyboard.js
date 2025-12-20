@@ -1,5 +1,5 @@
 // SORA Storyboard Prompt Generator API
-// Uses OpenAI to generate randomized travel video storyboards
+// Uses OpenAI to generate randomized travel video storyboards AND trick shot videos
 
 const ALLOWED_ORIGINS = new Set([
   'https://www.careersolutionsfortoday.com',
@@ -9,14 +9,38 @@ const ALLOWED_ORIGINS = new Set([
   'http://127.0.0.1:5500'
 ]);
 
-// Fixed host anchor - NEVER changes
+// ============================================
+// TRAVEL STYLE - Fixed anchors
+// ============================================
 const HOST_ANCHOR = `The subject is the same recurring woman in every video: a realistic but slightly stylized young woman in her late 20s, with soft symmetrical facial features, calm expressive eyes, natural makeup, and a warm, approachable presence. She has long dark brown hair worn loose with subtle movement in the wind. Her face shape, proportions, and overall appearance remain perfectly consistent across all scenes and episodes. She appears intelligent, grounded, and authentic — not a model, not exaggerated. She NEVER looks at the camera — she is always filmed candidly from behind, from the side, or at a distance as if a travel companion is documenting her journey without her posing. Her movements are natural and unscripted — walking, exploring, pausing to take in views, touching surfaces, looking out at landscapes. She is unaware of being filmed or simply comfortable ignoring the camera.`;
 
-// Audio and visual style - NEVER changes
 const AUDIO_STYLE = `Soft ambient cinematic music throughout, calm and inspirational, minimal instrumentation, slow build, no vocals. 
 
 VOICEOVER: The same woman's voice in every video — recorded at home after returning from her trip. Her voice is soft, slightly breathy, with a gentle rasp that feels lived-in. She speaks slowly, with natural pauses between thoughts, as if the memories are coming back to her in real-time. Slight smile in her voice. American accent, late 20s, educated but not pretentious. She sounds like she's curled up on a couch with a warm drink, sharing something meaningful with someone she trusts. Never rushed, never performative, never "presenter voice." Intimate, like an audio diary or a late-night conversation.`;
 const VISUAL_STYLE = `Realistic but slightly stylized visuals to avoid uncanny valley. Natural colors, soft contrast, subtle film grain. Documentary-style cinematography as if filmed by a travel companion. NO on-camera dialogue, NO lip-sync, NO direct eye contact with camera, NO text overlays. The woman never acknowledges the camera — she is simply living the moment while being observed.`;
+
+// ============================================
+// TRICK SHOT STYLE - Fixed anchors
+// ============================================
+const TRICK_SHOT_CHARACTERS = `The performers are a group of 2-4 young men in their 20s-30s, athletic build, wearing casual sporty clothing (hoodies, athletic shorts, sneakers, backwards caps). They have the energy of best friends hanging out — genuine reactions, high-fives, chest bumps, and over-the-top celebrations. Their faces and builds remain consistent across all videos. They look like regular guys, not professional athletes — relatable and fun.`;
+
+const TRICK_SHOT_AUDIO = `NO voiceover. NO narration. Audio is purely reactive and environmental:
+- Ambient sound of the location (wind, echo in warehouse, outdoor birds)
+- The WHOOSH of objects flying through air
+- Satisfying IMPACT sounds (ball hitting net, object landing in container, pins crashing)
+- Real human reactions: "NO WAY!", "LET'S GOOO!", loud cheering, disbelief laughter
+- Optional: upbeat energetic background music that builds to the moment of impact
+- Slow-motion sections have dramatic bass drop or silence-before-impact effect`;
+
+const TRICK_SHOT_VISUAL = `High-energy, multi-angle cinematography. Bright, saturated colors. Clean crisp footage — feels professional but not overly polished. Multiple camera angles including:
+- Wide establishing shot showing the full trick setup and distance
+- Close-up on the thrower's face (concentration, then release)
+- Tracking shot following the object mid-flight
+- Target angle showing the landing zone
+- Slow-motion replay of the key moment
+- Reaction shots of the group celebrating
+
+NO text overlays during action. Quick cuts. Satisfying slow-motion on impact. The energy should feel spontaneous and authentic, like friends filming each other doing something incredible.`;
 
 export default async function handler(req, res) {
   try {
@@ -38,7 +62,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { theme, customLocation } = req.body || {};
+    const { theme, customLocation, style = 'travel' } = req.body || {};
     
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_API_KEY) {
@@ -46,25 +70,45 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Generate randomized but educational content using OpenAI
-    const storyboardContent = await generateStoryboardContent(theme, customLocation, OPENAI_API_KEY);
-    
-    // Build the complete SORA prompt
-    const soraPrompt = buildSoraPrompt(storyboardContent);
-    
-    // Build JSON output for Zapier/webhook compatibility
-    const webhookPayload = {
-      success: true,
-      timestamp: new Date().toISOString(),
-      location: storyboardContent.location,
-      fact1: storyboardContent.fact1,
-      fact2: storyboardContent.fact2,
-      timeOfDay: storyboardContent.timeOfDay,
-      weather: storyboardContent.weather,
-      voiceoverLines: storyboardContent.voiceoverLines,
-      soraPrompt: soraPrompt,
-      estimatedDuration: '12-15 seconds'
-    };
+    let webhookPayload;
+
+    if (style === 'trickshot') {
+      // Generate trick shot content
+      const trickShotContent = await generateTrickShotContent(theme, OPENAI_API_KEY);
+      const soraPrompt = buildTrickShotPrompt(trickShotContent);
+      
+      webhookPayload = {
+        success: true,
+        style: 'trickshot',
+        timestamp: new Date().toISOString(),
+        trickType: trickShotContent.trickType,
+        object: trickShotContent.object,
+        target: trickShotContent.target,
+        location: trickShotContent.location,
+        difficulty: trickShotContent.difficulty,
+        setupDescription: trickShotContent.setupDescription,
+        soraPrompt: soraPrompt,
+        estimatedDuration: '10-15 seconds'
+      };
+    } else {
+      // Generate travel content (default)
+      const storyboardContent = await generateStoryboardContent(theme, customLocation, OPENAI_API_KEY);
+      const soraPrompt = buildSoraPrompt(storyboardContent);
+      
+      webhookPayload = {
+        success: true,
+        style: 'travel',
+        timestamp: new Date().toISOString(),
+        location: storyboardContent.location,
+        fact1: storyboardContent.fact1,
+        fact2: storyboardContent.fact2,
+        timeOfDay: storyboardContent.timeOfDay,
+        weather: storyboardContent.weather,
+        voiceoverLines: storyboardContent.voiceoverLines,
+        soraPrompt: soraPrompt,
+        estimatedDuration: '12-15 seconds'
+      };
+    }
 
     res.status(200).json(webhookPayload);
   } catch (error) {
@@ -245,3 +289,167 @@ ${VISUAL_STYLE}
 • Time of Day: ${timeOfDay}
 • Weather: ${weather}`;
 }
+
+
+// ============================================
+// TRICK SHOT GENERATION FUNCTIONS
+// ============================================
+
+async function generateTrickShotContent(theme, apiKey) {
+  const themePrompt = theme ? `Focus on ${theme} style trick shots.` : '';
+  
+  const prompt = `You are a viral trick shot video creator like Dude Perfect. Generate content for a 10-15 second trick shot YouTube Short.
+
+${themePrompt}
+
+Provide a JSON response with these exact fields:
+{
+  "trickType": "[specific trick type - e.g., 'Behind-the-back basketball shot', 'Ping pong ball into cup pyramid', 'Football spiral through tire swing']",
+  "object": "[the object being thrown/shot - e.g., 'basketball', 'frisbee', 'ping pong ball', 'paper airplane', 'football']",
+  "target": "[what they're aiming for - e.g., 'basketball hoop on roof', 'trash can 50 feet away', 'series of cups', 'tiny bucket on moving cart']",
+  "location": "[interesting location - e.g., 'abandoned warehouse', 'rooftop in city', 'backyard with pool', 'empty stadium', 'office building atrium']",
+  "difficulty": "[what makes it hard - e.g., 'from 3 stories up', 'blindfolded', 'off a trampoline bounce', 'through multiple obstacles']",
+  "setupDescription": "[2-3 sentences describing the full setup visually]",
+  "numPeople": [number 1-4],
+  "celebrationType": "[how they celebrate - e.g., 'running in circles screaming', 'dog pile', 'synchronized jumping', 'dramatic knee slide']",
+  "cameraAngles": ["array of 3-4 specific camera angles for this trick"],
+  "soundEffects": ["array of 2-3 key sound moments - whoosh, impact, reaction"]
+}
+
+Make it:
+- Visually spectacular and satisfying
+- Physically possible but impressively difficult
+- Varied (mix of sports, everyday objects, creative locations)
+- Have a clear "wow factor" moment
+
+JSON only, no markdown.`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'You are a viral video creator. Return valid JSON only.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.95,
+      max_tokens: 800,
+      response_format: { type: 'json_object' }
+    })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    throw new Error(`OpenAI API Error: ${errorData?.error?.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  return JSON.parse(data.choices[0].message.content);
+}
+
+function buildTrickShotPrompt(content) {
+  const {
+    trickType,
+    object,
+    target,
+    location,
+    difficulty,
+    setupDescription,
+    numPeople = 2,
+    celebrationType,
+    cameraAngles = [],
+    soundEffects = []
+  } = content;
+
+  return `🎬 SORA STORYBOARD — TRICK SHOT SHORT (MAX 15 seconds)
+
+═══════════════════════════════════════════════════════════
+🎯 TRICK OVERVIEW
+═══════════════════════════════════════════════════════════
+${trickType}
+${setupDescription}
+
+═══════════════════════════════════════════════════════════
+👥 CHARACTERS (SAME GROUP IN EVERY VIDEO)
+═══════════════════════════════════════════════════════════
+${TRICK_SHOT_CHARACTERS}
+
+Number of people in this shot: ${numPeople}
+
+═══════════════════════════════════════════════════════════
+🟦 SHOT 1 — THE HOOK / SETUP (2s)
+═══════════════════════════════════════════════════════════
+Purpose: Stop the scroll — show the impossible setup.
+
+WIDE SHOT: Reveal the full scale of the trick. Show ${location}. Camera positioned to emphasize the distance/difficulty. We see the ${target} far away or in a seemingly impossible position. ${numPeople > 1 ? 'One person holds the ' + object + ', others positioned around.' : 'The person holds the ' + object + ', focused.'} 
+
+The setup screams "this can't possibly work."
+
+═══════════════════════════════════════════════════════════
+🟦 SHOT 2 — CONCENTRATION & RELEASE (2s)
+═══════════════════════════════════════════════════════════
+Purpose: Build tension before the throw.
+
+CLOSE-UP on the thrower's face — intense focus, maybe a deep breath. Quick cut to hands gripping the ${object}. Then the release — ${difficulty}.
+
+🔊 Sound: Ambient tension, then the WHOOSH of ${object} leaving hands.
+
+═══════════════════════════════════════════════════════════
+🟦 SHOT 3 — THE FLIGHT (3s)
+═══════════════════════════════════════════════════════════
+Purpose: Track the object — build anticipation.
+
+TRACKING SHOT following the ${object} through the air. Multiple quick cuts between:
+${cameraAngles.map(angle => `- ${angle}`).join('\n')}
+
+Time seems to slow slightly. The ${object} arcs toward the ${target}. Will it make it?
+
+🔊 Sound: Sustained whoosh, building tension, maybe silence right before impact.
+
+═══════════════════════════════════════════════════════════
+🟦 SHOT 4 — THE IMPACT (2s)
+═══════════════════════════════════════════════════════════
+Purpose: The money shot — satisfying payoff.
+
+SLOW MOTION: The ${object} hits the ${target} PERFECTLY. Show it from the best angle to see the success clearly. The moment of impact is crisp and satisfying.
+
+🔊 Sound: Dramatic bass drop or silence → SATISFYING IMPACT SOUND → beat of silence.
+
+═══════════════════════════════════════════════════════════
+🟦 SHOT 5 — THE CELEBRATION (4s)
+═══════════════════════════════════════════════════════════
+Purpose: Human reaction — emotional payoff and shareability.
+
+WIDE + MEDIUM SHOTS: The group ERUPTS. ${celebrationType}. Pure disbelief and joy. Arms in the air, running toward each other, maybe tackling the thrower. The reaction should feel 100% genuine and over-the-top.
+
+🔊 Sound: 
+${soundEffects.map(sound => `- ${sound}`).join('\n')}
+- Screaming: "NO WAY!", "LET'S GOOO!", "DID THAT JUST HAPPEN?!"
+- Loud cheering, laughter, disbelief
+
+═══════════════════════════════════════════════════════════
+🎼 AUDIO (GLOBAL)
+═══════════════════════════════════════════════════════════
+${TRICK_SHOT_AUDIO}
+
+═══════════════════════════════════════════════════════════
+🎥 VISUAL STYLE (GLOBAL)
+═══════════════════════════════════════════════════════════
+${TRICK_SHOT_VISUAL}
+
+═══════════════════════════════════════════════════════════
+📋 VARIABLES USED
+═══════════════════════════════════════════════════════════
+• Trick Type: ${trickType}
+• Object: ${object}
+• Target: ${target}
+• Location: ${location}
+• Difficulty: ${difficulty}
+• People: ${numPeople}
+• Celebration: ${celebrationType}`;
+}
+
