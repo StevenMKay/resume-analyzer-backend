@@ -10,11 +10,11 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 // Fixed host anchor - NEVER changes
-const HOST_ANCHOR = `The host is the same recurring character in every video: a realistic but slightly stylized young woman in her late 20s, with soft symmetrical facial features, calm expressive eyes, natural makeup, and a warm, approachable presence. She has long dark brown hair worn loose with subtle movement in the wind. Her face shape, proportions, and overall appearance remain consistent across all scenes and episodes. She appears intelligent, grounded, and authentic — not a model, not exaggerated. She wears practical, stylish travel clothing appropriate to the environment.`;
+const HOST_ANCHOR = `The subject is the same recurring woman in every video: a realistic but slightly stylized young woman in her late 20s, with soft symmetrical facial features, calm expressive eyes, natural makeup, and a warm, approachable presence. She has long dark brown hair worn loose with subtle movement in the wind. Her face shape, proportions, and overall appearance remain perfectly consistent across all scenes and episodes. She appears intelligent, grounded, and authentic — not a model, not exaggerated. She NEVER looks at the camera — she is always filmed candidly from behind, from the side, or at a distance as if a travel companion is documenting her journey without her posing. Her movements are natural and unscripted — walking, exploring, pausing to take in views, touching surfaces, looking out at landscapes. She is unaware of being filmed or simply comfortable ignoring the camera.`;
 
 // Audio and visual style - NEVER changes
-const AUDIO_STYLE = `Soft ambient cinematic music throughout, calm and inspirational, minimal instrumentation, slow build, no vocals.`;
-const VISUAL_STYLE = `Realistic but slightly stylized visuals to avoid uncanny valley. Natural colors, soft contrast, subtle film grain. No on-camera dialogue, no lip-sync, no text overlays.`;
+const AUDIO_STYLE = `Soft ambient cinematic music throughout, calm and inspirational, minimal instrumentation, slow build, no vocals. The voiceover is recorded separately — it sounds like the woman narrating from home after her trip, with a warm, intimate, slightly reflective tone as if she's sharing the memory with a close friend. Her voice is natural, unhurried, and genuine — not performative or presenter-like.`;
+const VISUAL_STYLE = `Realistic but slightly stylized visuals to avoid uncanny valley. Natural colors, soft contrast, subtle film grain. Documentary-style cinematography as if filmed by a travel companion. NO on-camera dialogue, NO lip-sync, NO direct eye contact with camera, NO text overlays. The woman never acknowledges the camera — she is simply living the moment while being observed.`;
 
 export default async function handler(req, res) {
   try {
@@ -160,64 +160,66 @@ function buildSoraPrompt(content) {
   } = content;
 
   // Build the host description with location-appropriate clothing
-  const hostDescription = HOST_ANCHOR.replace(
-    'She wears practical, stylish travel clothing appropriate to the environment.',
-    `She wears ${hostClothing || 'practical, stylish travel clothing appropriate to the environment'}.`
-  );
+  const hostDescription = HOST_ANCHOR + ` She wears ${hostClothing || 'practical, stylish travel clothing appropriate to the environment'}.`;
 
   return `🎬 SORA STORYBOARD — TRAVEL SHORT (15-20 seconds)
 
 ═══════════════════════════════════════════════════════════
-🔑 HOST ANCHOR (CONSISTENT ACROSS ALL VIDEOS)
+🔑 CHARACTER ANCHOR (SAME WOMAN IN EVERY VIDEO)
 ═══════════════════════════════════════════════════════════
 ${hostDescription}
+
+═══════════════════════════════════════════════════════════
+🎙 VOICEOVER STYLE (RECORDED SEPARATELY AT HOME)
+═══════════════════════════════════════════════════════════
+The voiceover is NOT recorded on location. It's the same woman narrating from home after returning from her trip — warm, intimate, slightly reflective, as if sharing the memory with a close friend over tea. Her voice is natural, unhurried, and genuine. Same voice in every video for consistency.
 
 ═══════════════════════════════════════════════════════════
 🟦 SHOT 1 — ESTABLISHING (2-3s)
 ═══════════════════════════════════════════════════════════
 Purpose: Instantly communicate where we are and stop the scroll.
 
-Wide cinematic establishing shot of ${location}. ${timeOfDay} lighting with ${weather}. ${environmentDetails || 'The environment is immediately recognizable through natural landmarks and atmosphere.'} Subtle environmental motion.
+Wide cinematic establishing shot of ${location}. ${timeOfDay} lighting with ${weather}. ${environmentDetails || 'The environment is immediately recognizable through natural landmarks and atmosphere.'} Subtle environmental motion. No people visible yet.
 
 🎙 Voiceover (Line 1):
 "${voiceoverLines.line1}"
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 2 — HOST ENTERS FRAME (3-4s)
+🟦 SHOT 2 — SHE APPEARS IN THE LANDSCAPE (3-4s)
 ═══════════════════════════════════════════════════════════
-Purpose: Reinforce host consistency + human connection.
+Purpose: Introduce the recurring woman + human scale.
 
-The recurring female host walks naturally into frame within ${location}, turning slightly toward the camera. Her movement is relaxed and confident. Wind subtly moves her hair and clothing.
+FILMED FROM BEHIND OR SIDE: The woman walks naturally into the landscape of ${location}. She does NOT look at the camera — she is simply exploring, filmed candidly by an unseen travel companion. Wind subtly moves her hair and clothing. She might pause to look at something in the distance.
 
 🎙 Voiceover (Line 2):
 "${voiceoverLines.line2}"
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 3 — CONTEXT & EDUCATION (4-5s)
+🟦 SHOT 3 — DISCOVERY MOMENT (4-5s)
 ═══════════════════════════════════════════════════════════
-Purpose: Deliver value (education) without sounding like a tour guide.
+Purpose: Deliver value (education) through her experience.
 
-Medium shot of the host near a defining feature of ${location}. Environmental details clearly show what makes this place special. Camera movement is smooth and minimal.
+FILMED FROM BEHIND OR SIDE: Medium shot of the woman near a defining feature of ${location}. She reaches out to touch a surface, crouches to examine something, or simply stands taking it in. She is unaware of or ignoring the camera — lost in the moment. Camera movement is smooth, observational, documentary-style.
 
 🎙 Voiceover (Line 3):
 "${voiceoverLines.line3}"
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 4 — MEANING / IMPACT (3-4s)
+🟦 SHOT 4 — CONTEMPLATION (3-4s)
 ═══════════════════════════════════════════════════════════
 Purpose: Emotional hook (why this place matters).
 
-The host pauses and looks out toward the landscape. The environment feels vast and calm. Motion remains subtle and cinematic.
+FILMED FROM BEHIND: The woman stands still, looking out at the vast landscape. We see her from behind or at an angle — her silhouette against ${location}. She is simply present, breathing it in. The moment feels private and unposed.
 
 🎙 Voiceover (Line 4):
 "${voiceoverLines.line4}"
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 5 — LOOP SHOT (2-3s)
+🟦 SHOT 5 — WALKING AWAY / LOOP SHOT (2-3s)
 ═══════════════════════════════════════════════════════════
-Purpose: Retention + rewatch.
+Purpose: Retention + seamless loop.
 
-Wide shot visually similar to Shot 1, allowing a seamless loop. Natural motion continues.
+FILMED FROM BEHIND: Wide shot similar to Shot 1, but now with the woman walking slowly into the landscape, away from camera. Her figure becomes smaller against the vast environment. This mirrors Shot 1 for seamless looping.
 
 🎙 Voiceover (Line 5):
 "${voiceoverLines.line5}"
