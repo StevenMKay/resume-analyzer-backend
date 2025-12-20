@@ -13,7 +13,9 @@ const ALLOWED_ORIGINS = new Set([
 const HOST_ANCHOR = `The subject is the same recurring woman in every video: a realistic but slightly stylized young woman in her late 20s, with soft symmetrical facial features, calm expressive eyes, natural makeup, and a warm, approachable presence. She has long dark brown hair worn loose with subtle movement in the wind. Her face shape, proportions, and overall appearance remain perfectly consistent across all scenes and episodes. She appears intelligent, grounded, and authentic — not a model, not exaggerated. She NEVER looks at the camera — she is always filmed candidly from behind, from the side, or at a distance as if a travel companion is documenting her journey without her posing. Her movements are natural and unscripted — walking, exploring, pausing to take in views, touching surfaces, looking out at landscapes. She is unaware of being filmed or simply comfortable ignoring the camera.`;
 
 // Audio and visual style - NEVER changes
-const AUDIO_STYLE = `Soft ambient cinematic music throughout, calm and inspirational, minimal instrumentation, slow build, no vocals. The voiceover is recorded separately — it sounds like the woman narrating from home after her trip, with a warm, intimate, slightly reflective tone as if she's sharing the memory with a close friend. Her voice is natural, unhurried, and genuine — not performative or presenter-like.`;
+const AUDIO_STYLE = `Soft ambient cinematic music throughout, calm and inspirational, minimal instrumentation, slow build, no vocals. 
+
+VOICEOVER: The same woman's voice in every video — recorded at home after returning from her trip. Her voice is soft, slightly breathy, with a gentle rasp that feels lived-in. She speaks slowly, with natural pauses between thoughts, as if the memories are coming back to her in real-time. Slight smile in her voice. American accent, late 20s, educated but not pretentious. She sounds like she's curled up on a couch with a warm drink, sharing something meaningful with someone she trusts. Never rushed, never performative, never "presenter voice." Intimate, like an audio diary or a late-night conversation.`;
 const VISUAL_STYLE = `Realistic but slightly stylized visuals to avoid uncanny valley. Natural colors, soft contrast, subtle film grain. Documentary-style cinematography as if filmed by a travel companion. NO on-camera dialogue, NO lip-sync, NO direct eye contact with camera, NO text overlays. The woman never acknowledges the camera — she is simply living the moment while being observed.`;
 
 export default async function handler(req, res) {
@@ -170,9 +172,9 @@ function buildSoraPrompt(content) {
 ${hostDescription}
 
 ═══════════════════════════════════════════════════════════
-🎙 VOICEOVER STYLE (RECORDED SEPARATELY AT HOME)
+🎙 VOICEOVER STYLE (HER VOICE — SAME IN EVERY VIDEO)
 ═══════════════════════════════════════════════════════════
-The voiceover is NOT recorded on location. It's the same woman narrating from home after returning from her trip — warm, intimate, slightly reflective, as if sharing the memory with a close friend over tea. Her voice is natural, unhurried, and genuine. Same voice in every video for consistency.
+Recorded at home, not on location. Her voice is soft, slightly breathy, with a gentle rasp that feels lived-in. She speaks slowly with natural pauses — as if the memories are coming back to her in real-time. There's a slight smile in her voice. American accent, late 20s, educated but warm. She sounds like she's curled up on a couch, sharing something meaningful with someone she trusts. Never rushed. Never "presenter voice." Intimate, like an audio diary or a late-night conversation with a close friend.
 
 ═══════════════════════════════════════════════════════════
 🟦 SHOT 1 — ESTABLISHING (2-3s)
