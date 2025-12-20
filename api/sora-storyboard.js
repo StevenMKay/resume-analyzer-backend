@@ -88,7 +88,12 @@ export default async function handler(req, res) {
         difficulty: trickShotContent.difficulty,
         setupDescription: trickShotContent.setupDescription,
         soraPrompt: soraPrompt,
-        estimatedDuration: '10-15 seconds'
+        estimatedDuration: '10-15 seconds',
+        youtube: trickShotContent.youtube || {
+          title: `🎯 ${trickShotContent.trickType}`,
+          description: trickShotContent.setupDescription,
+          tags: 'trick shot, viral, shorts, amazing, skills, satisfying'
+        }
       };
     } else {
       // Generate travel content (default)
@@ -106,7 +111,12 @@ export default async function handler(req, res) {
         weather: storyboardContent.weather,
         voiceoverLines: storyboardContent.voiceoverLines,
         soraPrompt: soraPrompt,
-        estimatedDuration: '12-15 seconds'
+        estimatedDuration: '12-15 seconds',
+        youtube: storyboardContent.youtube || {
+          title: `🌍 ${storyboardContent.location}`,
+          description: `Discover ${storyboardContent.location}. ${storyboardContent.fact1}`,
+          tags: 'travel, nature, explore, wanderlust, shorts, beautiful places'
+        }
       };
     }
 
@@ -153,7 +163,12 @@ Provide a JSON response with these exact fields:
     "line5": "Places like this change how you think."
   },
   "hostClothing": "[appropriate travel outfit for this specific location and weather - e.g., 'warm earth-toned sweater and windbreaker' or 'light linen shirt and hiking pants']",
-  "environmentDetails": "[2-3 specific visual details that make this location recognizable]"
+  "environmentDetails": "[2-3 specific visual details that make this location recognizable]",
+  "youtube": {
+    "title": "[Catchy YouTube Shorts title, max 60 chars, use emoji at start, create curiosity/wonder - e.g., '🌋 This Beach is Made of Black Lava' or '✨ The Forest That Glows at Night']",
+    "description": "[2-3 sentence description for YouTube. Include location name, what makes it special, and a call-to-action. Keep under 200 chars]",
+    "tags": "[comma-separated SEO tags, 10-15 tags including: location name, country, travel, shorts, nature, wanderlust, explore, bucket list, and specific relevant terms]"
+  }
 }
 
 Make the content:
@@ -161,6 +176,7 @@ Make the content:
 - Inspiring and slightly poetic
 - Specific to real geography/history
 - Varied in location type (mix of beaches, mountains, forests, deserts, etc.)
+- YouTube title should stop the scroll and create curiosity
 
 JSON only, no markdown.`;
 
@@ -313,7 +329,12 @@ Provide a JSON response with these exact fields:
   "numPeople": [number 1-4],
   "celebrationType": "[how they celebrate - e.g., 'running in circles screaming', 'dog pile', 'synchronized jumping', 'dramatic knee slide']",
   "cameraAngles": ["array of 3-4 specific camera angles for this trick"],
-  "soundEffects": ["array of 2-3 key sound moments - whoosh, impact, reaction"]
+  "soundEffects": ["array of 2-3 key sound moments - whoosh, impact, reaction"],
+  "youtube": {
+    "title": "[Viral YouTube Shorts title, max 50 chars, use emoji, create hype - e.g., '🏀 IMPOSSIBLE Roof Shot!!' or '😱 No Way This Works...' - make it clickable and exciting]",
+    "description": "[Short exciting description, 1-2 sentences. Describe the trick, add hype, include call-to-action like 'Wait for it...' or 'Would you try this?'. Under 150 chars]",
+    "tags": "[comma-separated SEO tags, 10-15 tags including: trick shot, impossible, viral, shorts, satisfying, skills, amazing, and specific terms for the trick type/sport]"
+  }
 }
 
 Make it:
@@ -321,6 +342,7 @@ Make it:
 - Physically possible but impressively difficult
 - Varied (mix of sports, everyday objects, creative locations)
 - Have a clear "wow factor" moment
+- YouTube title should create FOMO and excitement
 
 JSON only, no markdown.`;
 
