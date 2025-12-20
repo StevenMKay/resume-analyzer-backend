@@ -63,7 +63,7 @@ export default async function handler(req, res) {
       weather: storyboardContent.weather,
       voiceoverLines: storyboardContent.voiceoverLines,
       soraPrompt: soraPrompt,
-      estimatedDuration: '15-20 seconds'
+      estimatedDuration: '12-15 seconds'
     };
 
     res.status(200).json(webhookPayload);
@@ -89,7 +89,7 @@ async function generateStoryboardContent(theme, customLocation, apiKey) {
   const themePrompt = theme ? `Focus on ${theme} themed locations.` : '';
   const locationHint = customLocation ? `Consider using or be inspired by: ${customLocation}.` : '';
   
-  const prompt = `You are a travel documentary content creator. Generate content for a 15-20 second YouTube short video about a unique, real-world location.
+  const prompt = `You are a travel documentary content creator. Generate content for a 12-15 second YouTube short video about a unique, real-world location.
 
 ${themePrompt}
 ${locationHint}
@@ -164,7 +164,7 @@ function buildSoraPrompt(content) {
   // Build the host description with location-appropriate clothing
   const hostDescription = HOST_ANCHOR + ` She wears ${hostClothing || 'practical, stylish travel clothing appropriate to the environment'}.`;
 
-  return `🎬 SORA STORYBOARD — TRAVEL SHORT (15-20 seconds)
+  return `🎬 SORA STORYBOARD — TRAVEL SHORT (MAX 15 seconds)
 
 ═══════════════════════════════════════════════════════════
 🔑 CHARACTER ANCHOR (SAME WOMAN IN EVERY VIDEO)
@@ -177,7 +177,7 @@ ${hostDescription}
 Recorded at home, not on location. Her voice is soft, slightly breathy, with a gentle rasp that feels lived-in. She speaks slowly with natural pauses — as if the memories are coming back to her in real-time. There's a slight smile in her voice. American accent, late 20s, educated but warm. She sounds like she's curled up on a couch, sharing something meaningful with someone she trusts. Never rushed. Never "presenter voice." Intimate, like an audio diary or a late-night conversation with a close friend.
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 1 — ESTABLISHING (2-3s)
+🟦 SHOT 1 — ESTABLISHING (2s)
 ═══════════════════════════════════════════════════════════
 Purpose: Instantly communicate where we are and stop the scroll.
 
@@ -187,7 +187,7 @@ Wide cinematic establishing shot of ${location}. ${timeOfDay} lighting with ${we
 "${voiceoverLines.line1}"
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 2 — SHE APPEARS IN THE LANDSCAPE (3-4s)
+🟦 SHOT 2 — SHE APPEARS IN THE LANDSCAPE (3s)
 ═══════════════════════════════════════════════════════════
 Purpose: Introduce the recurring woman + human scale.
 
@@ -197,7 +197,7 @@ FILMED FROM BEHIND OR SIDE: The woman walks naturally into the landscape of ${lo
 "${voiceoverLines.line2}"
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 3 — DISCOVERY MOMENT (4-5s)
+🟦 SHOT 3 — DISCOVERY MOMENT (4s)
 ═══════════════════════════════════════════════════════════
 Purpose: Deliver value (education) through her experience.
 
@@ -207,7 +207,7 @@ FILMED FROM BEHIND OR SIDE: Medium shot of the woman near a defining feature of 
 "${voiceoverLines.line3}"
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 4 — CONTEMPLATION (3-4s)
+🟦 SHOT 4 — CONTEMPLATION (3s)
 ═══════════════════════════════════════════════════════════
 Purpose: Emotional hook (why this place matters).
 
@@ -217,7 +217,7 @@ FILMED FROM BEHIND: The woman stands still, looking out at the vast landscape. W
 "${voiceoverLines.line4}"
 
 ═══════════════════════════════════════════════════════════
-🟦 SHOT 5 — WALKING AWAY / LOOP SHOT (2-3s)
+🟦 SHOT 5 — WALKING AWAY / LOOP SHOT (3s)
 ═══════════════════════════════════════════════════════════
 Purpose: Retention + seamless loop.
 
