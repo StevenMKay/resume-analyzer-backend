@@ -160,7 +160,7 @@ Provide a JSON response with these exact fields:
     "line2": "It's one of the most [adjective] places on Earth.",
     "line3": "What you're seeing here is [fact1 rephrased naturally].",
     "line4": "It exists because [fact2 rephrased naturally].",
-    "line5": "Places like this change how you think."
+    "line5": "[A unique, poetic closing line that fits THIS specific location - vary it every time. Examples: 'Some places just stay with you.' / 'I never wanted to leave.' / 'This is why I travel.' / 'Nature's artwork.' / 'Worth every step to get here.' - make it feel personal and specific, not generic]"
   },
   "hostClothing": "[appropriate travel outfit for this specific location and weather - e.g., 'warm earth-toned sweater and windbreaker' or 'light linen shirt and hiking pants']",
   "environmentDetails": "[2-3 specific visual details that make this location recognizable]",
