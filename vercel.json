@@ -5,6 +5,12 @@
     },
     "api/explain-formula.py": {
       "maxDuration": 45
+    },
+    "api/extract-starter.js": {
+      "maxDuration": 45
+    },
+    "api/generate-jd.js": {
+      "maxDuration": 45
     }
   },
   "headers": [
