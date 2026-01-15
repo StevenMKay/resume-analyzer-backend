@@ -1,6 +1,4 @@
-import OpenAI from "openai";
-
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// api/generate-jd.js
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "https://www.careersolutionsfortoday.com");
@@ -11,6 +9,42 @@ function cors(res) {
 
 function safeJsonParse(text, fallback) {
   try { return JSON.parse(text); } catch { return fallback; }
+}
+
+async function callOpenAI(prompt) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY environment variable");
+
+  const r = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: "gpt-5.2",
+      input: prompt,
+      reasoning: { effort: "low" }
+    })
+  });
+
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = data?.error?.message || `OpenAI request failed (${r.status})`;
+    throw new Error(msg);
+  }
+
+  const outputText =
+    data.output_text ||
+    (Array.isArray(data.output)
+      ? data.output
+          .flatMap(o => o?.content || [])
+          .map(c => c?.text)
+          .filter(Boolean)
+          .join("\n")
+      : "");
+
+  return outputText || "";
 }
 
 export default async function handler(req, res) {
@@ -33,37 +67,37 @@ export default async function handler(req, res) {
 
     const prompt = `
 You are an expert HR/Recruiting writer.
-Create a modern ATS-friendly job description with headings + bullets.
+Create a modern, ATS-friendly job description with clear headings and bullet points.
 
-Tone: ${input.tone || "Professional"}
-${lengthGuide}
+STYLE:
+- Tone: ${input.tone || "Professional"}
+- ${lengthGuide}
+- Use headings like: About the Role, Responsibilities, Qualifications, Preferred, Benefits (if provided), EEO
+- Avoid protected-class preferences. Include a generic EEO line.
 
-Inputs:
-Job title: ${input.jobTitle}
-Company: ${input.company || "N/A"}
-Location: ${input.location || "N/A"}
-Employment type: ${input.employmentType || "N/A"}
-Seniority: ${input.seniority || "N/A"}
-Must skills: ${input.mustSkills || "N/A"}
-Nice skills: ${input.niceSkills || "N/A"}
-Responsibilities: ${input.responsibilities || "N/A"}
-Team mission: ${input.teamMission || "N/A"}
+INPUTS:
+- Job title: ${input.jobTitle}
+- Company: ${input.company || "N/A"}
+- Location: ${input.location || "N/A"}
+- Employment type: ${input.employmentType || "N/A"}
+- Seniority: ${input.seniority || "N/A"}
+- Must-have skills: ${input.mustSkills || "N/A"}
+- Nice-to-have skills: ${input.niceSkills || "N/A"}
+- Responsibilities ideas: ${input.responsibilities || "N/A"}
+- Team/mission: ${input.teamMission || "N/A"}
 
-Return JSON only:
+OUTPUT (JSON only):
 {
-  "job_description": "string",
-  "ats_keywords": ["..."],
-  "clarity_notes": ["..."]
+  "job_description": "string (formatted with headings + bullets)",
+  "ats_keywords": ["string", "..."],
+  "clarity_notes": ["string", "..."]
 }
     `.trim();
 
-    const response = await client.responses.create({
-      model: "gpt-5.2",
-      reasoning: { effort: "low" },
-      input: prompt
-    });
+    const text = await callOpenAI(prompt);
+    const parsed = safeJsonParse(text, {});
+    return res.status(200).json(parsed);
 
-    return res.status(200).json(safeJsonParse(response.output_text || "{}", {}));
   } catch (err) {
     console.error("generate-jd error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
