@@ -1,23 +1,11 @@
-// api/generate-jd.js
 import OpenAI from "openai";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-function setCors(req, res) {
-  const allowed = (process.env.ALLOWED_ORIGINS || "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean);
-
-  const origin = req.headers.origin;
-  const allowOrigin = allowed.length === 0
-    ? (origin || "*")
-    : (allowed.includes(origin) ? origin : allowed[0]);
-
-  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
-  res.setHeader("Vary", "Origin");
+function cors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "https://www.careersolutionsfortoday.com");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Max-Age", "86400");
 }
 
@@ -26,7 +14,7 @@ function safeJsonParse(text, fallback) {
 }
 
 export default async function handler(req, res) {
-  setCors(req, res);
+  cors(res);
 
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -45,31 +33,27 @@ export default async function handler(req, res) {
 
     const prompt = `
 You are an expert HR/Recruiting writer.
-Create a modern, ATS-friendly job description with clear headings and bullet points.
+Create a modern ATS-friendly job description with headings + bullets.
 
-STYLE:
-- Tone: ${input.tone || "Professional"}
-- ${lengthGuide}
-- Use headings like: About the Role, Responsibilities, Qualifications, Preferred, Benefits (if provided), EEO
-- Avoid protected-class preferences. Include a generic EEO line.
+Tone: ${input.tone || "Professional"}
+${lengthGuide}
 
-INPUTS:
-- Job title: ${input.jobTitle}
-- Company: ${input.company || "N/A"}
-- Location: ${input.location || "N/A"}
-- Employment type: ${input.employmentType || "N/A"}
-- Seniority: ${input.seniority || "N/A"}
+Inputs:
+Job title: ${input.jobTitle}
+Company: ${input.company || "N/A"}
+Location: ${input.location || "N/A"}
+Employment type: ${input.employmentType || "N/A"}
+Seniority: ${input.seniority || "N/A"}
+Must skills: ${input.mustSkills || "N/A"}
+Nice skills: ${input.niceSkills || "N/A"}
+Responsibilities: ${input.responsibilities || "N/A"}
+Team mission: ${input.teamMission || "N/A"}
 
-- Must-have skills: ${input.mustSkills || "N/A"}
-- Nice-to-have skills: ${input.niceSkills || "N/A"}
-- Responsibilities ideas: ${input.responsibilities || "N/A"}
-- Team/mission: ${input.teamMission || "N/A"}
-
-OUTPUT (JSON only):
+Return JSON only:
 {
-  "job_description": "string (formatted with headings + bullets)",
-  "ats_keywords": ["string", "..."],
-  "clarity_notes": ["string", "..."]
+  "job_description": "string",
+  "ats_keywords": ["..."],
+  "clarity_notes": ["..."]
 }
     `.trim();
 
@@ -79,9 +63,7 @@ OUTPUT (JSON only):
       input: prompt
     });
 
-    const parsed = safeJsonParse(response.output_text || "{}", {});
-    return res.status(200).json(parsed);
-
+    return res.status(200).json(safeJsonParse(response.output_text || "{}", {}));
   } catch (err) {
     console.error("generate-jd error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
